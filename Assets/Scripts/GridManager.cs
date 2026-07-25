@@ -236,6 +236,17 @@ public class GridManager : MonoBehaviour
         return new Vector3(coord.x * tileSize - offsetX, 0f, coord.y * tileSize - offsetZ);
     }
 
+    // 월드 좌표 → 가장 가까운 타일 좌표 (GridToWorld의 역변환). 범위 밖이면 (-1,-1)
+    public Vector2Int WorldToGrid(Vector3 world)
+    {
+        float offsetX = (width - 1) * tileSize * 0.5f;
+        float offsetZ = (height - 1) * tileSize * 0.5f;
+        int gx = Mathf.RoundToInt((world.x + offsetX) / Mathf.Max(0.0001f, tileSize));
+        int gy = Mathf.RoundToInt((world.z + offsetZ) / Mathf.Max(0.0001f, tileSize));
+        if (gx < 0 || gx >= width || gy < 0 || gy >= height) return new Vector2Int(-1, -1);
+        return new Vector2Int(gx, gy);
+    }
+
     public Tile GetTile(Vector2Int coord)
     {
         if (tiles == null) return null;

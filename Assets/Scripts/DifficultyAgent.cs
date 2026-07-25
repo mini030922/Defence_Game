@@ -4,14 +4,14 @@ using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 
 // 난이도 조절 강화학습 에이전트 (설계상 '역할 C: DDA').
-// - 관찰: GameStateCollector의 게임 상태 9개
-// - 행동: 다음 라운드 적 수 배율 / 적 체력 배율 (연속값 2개)
+// - 관찰: 게임 상태 11개 + 라운드 진행도 + 현재 강도 + 현재 체력배율 = 14개
+// - 행동: 강도 상승폭 / 종류별 가중치 3 / 체력배율 상승폭 (연속값 5개)
 // - 보상: 플레이어가 '아슬아슬하게' 클리어할수록 +, 너무 쉽거나 붕괴하면 -
 //
 // 필요 컴포넌트(인스펙터): Behavior Parameters
-//   - Vector Observation > Space Size = 9
-//   - Actions > Continuous Actions = 2
-//   - Behavior Type = Heuristic Only (검증) / Default (학습)
+//   - Vector Observation > Space Size = 14
+//   - Actions > Continuous Actions = 5
+//   - Behavior Type = Default(학습) / Inference Only(플레이·스파링) / Heuristic Only(검증)
 public class DifficultyAgent : Agent
 {
     [Header("연결 (비우면 자동으로 찾음)")]
@@ -34,6 +34,15 @@ public class DifficultyAgent : Agent
     public int lateNeutralStage = 5;          // 이 스테이지의
     public int lateNeutralRound = 5;          // 이 라운드(1부터)부터 죽어도 중립
     public float lateDeathReward = 0f;        // 후반 아슬아슬한 패배 = 나쁘지도 좋지도 않게
+
+    [Header("행동: 난이도 상승 폭 (단조 증가는 유지하되 '증분'으로 조절)")]
+    // 예전엔 Mathf.Max(원하는값, 직전값)이라 1라운드에 우연히 2.0이 나오면 남은 라운드의
+    // 행동이 통째로 무시(검열)됐다 → 행동↔결과 연결이 끊겨 학습 불가.
+    // 이제는 '이번 라운드에 얼마나 올릴지(0~step)'를 정하는 방식 → 매 라운드 행동이 반영된다.
+    public float maxIntensity = 2f;         // 강도 상한
+    public float intensityStep = 0.2f;      // 라운드당 최대 강도 상승폭 (10라운드면 최대 +2.0까지 시도 가능)
+    public float maxHealthMultiplier = 2f;  // 체력 배율 상한
+    public float healthStep = 0.15f;        // 라운드당 최대 체력 배율 상승폭
 
     [Header("보상: 타워 가동률 페널티 (놀던 타워 많으면 = 너무 쉬움)")]
     public float minUtil = 0.3f;            // 가동률이 이 값 미만이면 마이너스 보상
@@ -79,35 +88,48 @@ public class DifficultyAgent : Agent
         sensor.AddObservation(Mathf.Clamp01(s.lastRoundHealthLost / 20f));
         sensor.AddObservation(s.towerUtilization);              // 0~1 (타워 평균 가동률: 낮으면 놀던 타워 많음=쉬움)
         sensor.AddObservation(Mathf.Clamp01(s.pathLength / 100f)); // 경로 칸 수 (길수록 쉬운 맵)
+
+        // ── 아래 3개는 보상과 직결된 필수 관찰 ────────────────────────────
+        // (1) 라운드 진행도: GradeRound의 난이도 위치 D가 라운드에 절반(0.5) 의존한다.
+        //     이걸 안 보여주면 "똑같아 보이는 상태에서 어떤 땐 +1, 어떤 땐 -1"이 되어 수렴 불가.
+        float roundNorm = (roundManager != null && roundManager.RoundsPerStage > 1)
+            ? Mathf.Clamp01(roundManager.CurrentRound / (float)(roundManager.RoundsPerStage - 1))
+            : 0f;
+        sensor.AddObservation(roundNorm);
+        // (2)(3) 자기가 지금까지 올려둔 난이도. 라운드를 넘어 누적되는 상태라 관찰이 없으면 부분관측.
+        //        (CollectObservations는 OnActionReceived보다 먼저 불리므로 '직전 라운드까지의 값'이다)
+        sensor.AddObservation(Mathf.InverseLerp(1f, maxIntensity, intensity));
+        sensor.AddObservation(Mathf.InverseLerp(1f, maxHealthMultiplier, healthMultiplier));
     }
 
     // 에이전트의 행동을 받아 다음 라운드 난이도 배율로 변환
     public override void OnActionReceived(ActionBuffers actions)
     {
         var a = actions.ContinuousActions;
-        // a0: 강도(단조 증가), a1~a3: 종류별 가중치(일반/빠름/탱커), a4: 체력(단조 증가)
-        float desiredIntensity = Remap(a[0], 1.0f, 2.0f);
-        intensity = Mathf.Max(desiredIntensity, prevIntensity);
+        // a0: 이번 라운드 강도 상승폭(0~intensityStep), a1~a3: 종류별 가중치, a4: 체력 상승폭
+        // → 값 자체가 아니라 '증분'을 정하므로 단조 증가를 지키면서도 매 라운드 행동이 반영된다.
+        float upI = Mathf.Clamp01((a[0] + 1f) * 0.5f) * intensityStep;
+        intensity = Mathf.Clamp(prevIntensity + upI, 1f, maxIntensity);
         prevIntensity = intensity;
 
         typeWeights[0] = Mathf.Clamp01((a[1] + 1f) * 0.5f);
         typeWeights[1] = Mathf.Clamp01((a[2] + 1f) * 0.5f);
         typeWeights[2] = Mathf.Clamp01((a[3] + 1f) * 0.5f);
 
-        float desiredHealth = Remap(a[4], 1.0f, 2.0f);
-        healthMultiplier = Mathf.Max(desiredHealth, prevHealth);
+        float upH = Mathf.Clamp01((a[4] + 1f) * 0.5f) * healthStep;
+        healthMultiplier = Mathf.Clamp(prevHealth + upH, 1f, maxHealthMultiplier);
         prevHealth = healthMultiplier;
 
-        Debug.Log($"[난이도] 강도 {intensity:0.00} · 가중치 [{typeWeights[0]:0.0}/{typeWeights[1]:0.0}/{typeWeights[2]:0.0}] · 체력 {healthMultiplier:0.00}");
+        Debug.Log($"[난이도] 강도 {intensity:0.00}(+{upI:0.00}) · 가중치 [{typeWeights[0]:0.0}/{typeWeights[1]:0.0}/{typeWeights[2]:0.0}] · 체력 {healthMultiplier:0.00}(+{upH:0.00})");
     }
 
-    // 학습 없이(사람이 플레이) 검증할 때 쓰는 기본 행동: 중간 난이도(배율 1.0)
+    // 학습 없이(사람이 플레이) 검증할 때 쓰는 기본 행동: 난이도 안 올림(상승폭 0)
     public override void Heuristic(in ActionBuffers actionsOut)
     {
         ActionSegment<float> c = actionsOut.ContinuousActions;
-        c[0] = -1f;                          // 강도 1.0 (기본)
+        c[0] = -1f;                          // 강도 상승폭 0 → 1.0 유지
         c[1] = 0f; c[2] = -1f; c[3] = -1f;   // 일반 위주 배분
-        c[4] = -1f;                          // 체력 1.0
+        c[4] = -1f;                          // 체력 상승폭 0 → 1.0 유지
     }
 
     // RoundManager가 라운드 종료 시 호출 → 아슬아슬함을 보상으로 환산
@@ -165,11 +187,5 @@ public class DifficultyAgent : Agent
         }
         AddReward(reward);
         Debug.Log($"[보상] S{stage} R{roundNum} D{D:0.00} · 손실 {lossFraction:0.00} 가동률 {util:0.00} died={died} lateN={lateNeutral} → {reward:0.00}");
-    }
-
-    float Remap(float x, float min, float max)
-    {
-        float t = Mathf.Clamp01((x + 1f) * 0.5f);
-        return Mathf.Lerp(min, max, t);
     }
 }

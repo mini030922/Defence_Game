@@ -1,5 +1,6 @@
 # Placement AI (optimal tower placement) training config - PPO
-# Observations = GRID_W*GRID_H*5 + 12 (default 20*16*5+12 = 1612, vector).
+# Observations = GRID_W*GRID_H*7 + 12 (default 20*16*7+12 = 2252, vector).
+# channels: buildable / path / tower / pathProgress / pathProximity / pathDensity / enemyDensity
 # Actions = 3 discrete branches: [1+2*towerTypes, GRID_W, GRID_H] = default [11, 20, 16]
 # Behavior Name must be: Placement
 behaviors:
@@ -23,6 +24,7 @@ behaviors:
         gamma: 0.99
         strength: 1.0
     keep_checkpoints: 5
-    max_steps: 3000000
+    checkpoint_interval: 500000
+    max_steps: 6000000
     time_horizon: 64
     summary_freq: 2000

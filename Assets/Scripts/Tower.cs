@@ -11,8 +11,17 @@ public class Tower : MonoBehaviour
     public float shootingSpeed;      // 공격 간격(초): n이면 n초에 1번
     public float damage;
     public float minRange;
-    public float maxRange;
+    public float maxRange;      // '몇 칸'이라는 개념값. 배치 AI·UI가 쓰는 기준은 이 숫자 그대로.
     public int cost;
+
+    [Header("사거리 보정")]
+    // 타일은 중심 기준 ±0.5칸을 차지한다. 판정을 maxRange로 자르면 n번째 칸의 '중심까지'만 닿아서
+    // 그 칸의 바깥 절반(n ~ n+0.5)이 사각지대가 된다. 실제 타격 판정만 +0.5 해서 n번째 칸을 온전히 덮는다.
+    public float rangeBonus = 0.5f;
+    public float AttackRange => maxRange + rangeBonus;
+
+    // 이 타워가 실제로 가동을 시작한 시각 (전투 중에 지어진 타워의 가동률을 공정하게 계산하기 위함)
+    [System.NonSerialized] public float activeSince;
 
     [Header("광역 공격 (targetArea가 true일 때만 사용)")]
     public float splashRadius = 1.5f;
@@ -40,7 +49,7 @@ public class Tower : MonoBehaviour
     private float baseShootingSpeed;
     private bool baseCaptured = false;
 
-    void Awake() { CaptureBase(); }
+    void Awake() { CaptureBase(); activeSince = Time.time; }
 
     void CaptureBase()
     {
@@ -82,7 +91,7 @@ public class Tower : MonoBehaviour
         {
             if (anchor == null) continue;
             float d = HorizontalDistance(transform.position, anchor.transform.position);
-            if (d < minRange || d > maxRange) continue; // 사거리 안 적만 조준점 후보
+            if (d < minRange || d > AttackRange) continue; // 사거리 안 적만 조준점 후보
             int count = 0;
             foreach (Enemy e in all)
                 if (e != null && HorizontalDistance(anchor.transform.position, e.transform.position) <= splashRadius)
@@ -151,7 +160,7 @@ public class Tower : MonoBehaviour
         {
             if (e == null) continue;
             float d = HorizontalDistance(transform.position, e.transform.position);
-            if (d < minRange || d > maxRange) continue;
+            if (d < minRange || d > AttackRange) continue;
 
             if (targetHighestHealth)
             {
@@ -175,7 +184,7 @@ public class Tower : MonoBehaviour
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.yellow;
-        DrawCircle(maxRange);
+        DrawCircle(AttackRange);   // 실제 타격 범위를 그린다
         if (minRange > 0f)
         {
             Gizmos.color = Color.gray;

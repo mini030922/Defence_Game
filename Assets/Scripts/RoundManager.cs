@@ -49,6 +49,11 @@ public class RoundManager : MonoBehaviour
     [Header("최적 배치 AI")]
     public bool usePlacementAgent = false; // true면 정비 단계에 봇 대신 PlacementAgent가 타워 배치
 
+    [Header("전투 중 건설 (사람 플레이어는 원래 가능 — 배치 AI에게도 같은 권한)")]
+    public bool allowBuildDuringCombat = true;
+    public float combatDecisionInterval = 1.5f; // 전투 중 배치 AI에게 결정을 묻는 간격(초)
+    public int maxActionsPerCombatTick = 2;     // 한 틱에 내릴 수 있는 최대 결정 수
+
     private enum State { Prep, Spawning, Fighting, StageClear, StageFail }
     private State state = State.Prep;
     private int currentRound = 0;
@@ -181,15 +186,27 @@ public class RoundManager : MonoBehaviour
 
             // ── 스폰 → 소탕 대기 ──
             state = State.Spawning;
+
+            // 전투 중에도 배치 AI가 증축할 수 있게 병렬 루프를 띄운다 (처치 골드를 바로 재투자)
+            Coroutine combatBuild = null;
+            if (usePlacementAgent && placementAgent != null && allowBuildDuringCombat)
+                combatBuild = StartCoroutine(CombatBuildLoop());
+
             yield return StartCoroutine(SpawnRound(round));
             roundSpawnEndTime = Time.time; // 스폰 완료 시각 기록
 
             state = State.Fighting;
             while (aliveEnemies > 0)
             {
-                if (IsPlayerDead()) { EndRoundFail(); yield break; }
+                if (IsPlayerDead())
+                {
+                    if (combatBuild != null) StopCoroutine(combatBuild);
+                    EndRoundFail();
+                    yield break;
+                }
                 yield return null;
             }
+            if (combatBuild != null) StopCoroutine(combatBuild);
 
             // ── 라운드 클리어 → 보상 ──
             ComputeTowerUtilization(); // 이번 라운드 가동률 먼저 계산 (보상에서 사용)
@@ -210,6 +227,28 @@ public class RoundManager : MonoBehaviour
             placementAgent.EndEpisode();
         }
         if (agent != null) agent.EndEpisode();  // → 다음 에피소드 자동 시작
+    }
+
+    // 전투 중 배치: 일정 간격으로 배치 AI에게 "지금 더 지을래?"를 묻는다.
+    // (중첩 코루틴을 쓰지 않고 여기서 직접 결정을 요청해야 라운드 종료 시 확실히 멈출 수 있다)
+    IEnumerator CombatBuildLoop()
+    {
+        while (state == State.Spawning || state == State.Fighting)
+        {
+            yield return new WaitForSeconds(combatDecisionInterval);
+            if (state != State.Spawning && state != State.Fighting) yield break;
+            if (IsPlayerDead()) yield break;
+
+            for (int i = 0; i < maxActionsPerCombatTick; i++)
+            {
+                placementAgent.lastActionWasNoOp = false;
+                placementAgent.RequestDecision();
+                yield return new WaitForFixedUpdate();
+                yield return new WaitForFixedUpdate();
+                if (placementAgent.lastActionWasNoOp) break;   // 지금은 안 짓겠다 → 이번 틱 종료
+                if (state != State.Spawning && state != State.Fighting) yield break;
+            }
+        }
     }
 
     // 살아남은 라운드의 보상: 체력 손실 비율을 목표치와 비교
@@ -388,10 +427,14 @@ public class RoundManager : MonoBehaviour
         Tower[] towers = Object.FindObjectsByType<Tower>(FindObjectsSortMode.None);
         if (towers.Length == 0) { collector.lastRoundTowerUtilization = 0f; return; }
 
-        float duration = Mathf.Max(0.1f, Time.time - roundStartTime);
         float sum = 0f;
         foreach (Tower t in towers)
         {
+            // 전투 중에 지어진 타워는 '지어진 뒤부터'를 기준으로 가동률을 잰다.
+            // (라운드 전체 시간으로 나누면 늦게 지은 타워가 놀았다고 잘못 집계돼,
+            //  towerActivity 보상이 전투 중 건설이라는 행동을 오히려 벌하게 된다)
+            float since = Mathf.Max(roundStartTime, t.activeSince);
+            float duration = Mathf.Max(0.1f, Time.time - since);
             float maxShots = (t.shootingSpeed > 0f) ? duration / t.shootingSpeed : 0f;
             float util = (maxShots > 0f) ? Mathf.Clamp01(t.shotsThisRound / maxShots) : 0f;
             sum += util;

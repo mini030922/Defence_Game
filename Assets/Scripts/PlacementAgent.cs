@@ -11,14 +11,15 @@ using Unity.MLAgents.Sensors;
 //     branch1: 타일 X (0..GRID_W-1)
 //     branch2: 타일 Y (0..GRID_H-1)
 //   → 유효하지 않은 선택은 액션 마스킹으로 대부분 차단
-// - 보상: 라운드를 적은 피해로 넘길수록 +, 죽으면 큰 -, 스테이지 클리어 시 +보너스 (DDA와 반대 목표)
+// - 보상(v3): 라운드를 넘기면 항상 + (피해가 적을수록 더 큼), 죽으면 큰 - (일찍 포기할수록 더 큼),
+//             스테이지 클리어 시 +보너스. DDA와 반대 목표.
 //
 // 에피소드 루프는 DifficultyAgent(DDA)가 주도한다. 이 에이전트는 '정비 단계'에
 // RoundManager가 BuildPhase()를 돌려 여러 번 결정을 내리게 하고, 라운드 결과로 보상만 받는다.
 //
 // 인스펙터(Behavior Parameters) 설정:
 //   - Behavior Name = Placement
-//   - Vector Observation > Space Size = GRID_W*GRID_H*5 + 12  (기본 20*16*5+12 = 1612)
+//   - Vector Observation > Space Size = GRID_W*GRID_H*7 + 12  (기본 20*16*7+12 = 2252)
 //   - Actions > Discrete Branches = 3, 크기 = [1+2*타워종류수, GRID_W, GRID_H] = 기본 [11, 20, 16]
 //   - Behavior Type = Default(학습) / Inference Only(고정 상대로 쓸 때)
 //   - DecisionRequester는 붙이지 말 것 (RequestDecision을 코드에서 직접 호출)
@@ -27,13 +28,23 @@ public class PlacementAgent : Agent
     [Header("그리드 최대 크기 (실제 그리드 ≤ 이 값이어야 함)")]
     public int gridW = 20;
     public int gridH = 16;
-    private const int CHANNELS = 5;   // 설치가능-빈칸 / 경로 / 타워있음 / 경로진행도 / 경로근접도
+    // 채널: 설치가능-빈칸 / 경로 / 타워있음 / 경로진행도 / 경로근접도 / 경로밀집도 / 적밀도
+    private const int CHANNELS = 7;
     private const int SCALARS = 12;
     private const float PROX_REF = 5f; // 경로 근접도 정규화 기준(타일). 이 거리 이상이면 0
 
-    // 경로 진행도/근접도 맵 (매 관측마다 재계산, 재사용해서 GC 최소화)
+    [Header("경로 밀집도 관측 (여러 경로 구간을 한 번에 덮는 자리를 알아보게)")]
+    // '경로에 붙어 있으면 좋다'(근접도)만으로는 뱀형 경로가 접히는 목 좋은 자리를 구분 못 한다.
+    // 이 채널은 각 칸에서 densityRefRange 안에 경로 칸이 몇 개나 들어오는지를 알려준다.
+    public float densityRefRange = 3f;   // 밀집도 판정 반경(칸) — 일반 타워 사거리 기준
+    public float densityRefTiles = 10f;  // 이만큼 덮이면 1.0
+    public float enemyDensRefCount = 3f; // 한 칸에 적이 이만큼 겹치면 1.0
+
+    // 그리드 맵들 (매 관측마다 재계산, 배열 재사용으로 GC 최소화)
     private float[,] pathProg;
     private float[,] pathProx;
+    private float[,] pathDens;
+    private float[,] enemyDens;
 
     [Header("연결 (비우면 자동으로 찾음)")]
     public GridManager grid;
@@ -46,15 +57,23 @@ public class PlacementAgent : Agent
     public int maxActionsPerPrep = 12;     // 한 정비 단계에서 내릴 최대 결정 수
 
     [Header("보상 - 기본/체력")]
-    public float surviveBase = 0.2f;      // 라운드 생존 기본 보상 (고스테이지 가중 적용)
-    public float healthLossWeight = 3f;   // 체력 손실 벌 = 손실비율 × 이 값 (조금만 닳아도 큰 타격)
-    public float deathPenalty = 1.5f;     // 라운드 패배(사망) 시 큰 벌
-    public float clearBonus = 1f;         // 스테이지 클리어 시 +이만큼 (고스테이지 가중)
-    public float illegalPenalty = 0.01f;  // 유효하지 않은 건설 시도 시 소량 -
-    public float uselessTowerPenalty = 0.05f; // 사거리 여유 안에 경로가 없는 자리에 지으려 하면 즉시 벌 (짓지 않음) — 비용에 비례해 커짐
-    public float rangeMargin = 1f;            // 사거리 판정 여유: 실제 사거리 n에서 (n − 이 값) 안에 경로가 없으면 벌 (경계 배치 방지)
+    // ⚠️ 핵심 원칙 (v3, 2026-07-25): 라운드를 살아서 넘기는 것은 어떤 상황에서도 죽는 것보다 나아야 한다.
+    //    v2에서는 손실 15%만 넘으면 라운드 보상이 음수가 됐고, 죽음은 -1 '한 번'에 에피소드가 끝나서
+    //    "어차피 못 깰 판이면 투자 안 하고 빨리 지는 것"이 최적 정책이 되어버렸다.
+    public float surviveBase = 0.5f;      // 라운드 생존 기본 보상 (고스테이지 가중 적용)
+    public float healthLossWeight = 1.5f; // 체력 손실 벌 = 손실비율 × 이 값
+    public float minRoundReward = 0.05f;  // 라운드 생존 보상의 하한 — 아무리 두들겨 맞아도 넘기면 이득
+    public float deathPenalty = 1.5f;     // 라운드 패배(사망) 시 기본 벌
+    public float giveUpWeight = 1f;       // 남은 라운드가 많을수록 사망 벌 가중 (1라운드 포기 = -3.0, 마지막 라운드 = -1.5)
+    public float clearBonus = 2f;         // 스테이지 클리어 시 +이만큼 (고스테이지 가중)
+    public float illegalPenalty = 0.003f; // 유효하지 않은 건설 시도 시 소량 - (액션 마스킹이 이미 거르므로 아주 작게)
+    public float uselessTowerPenalty = 0.02f; // 사거리 여유 안에 경로가 없는 자리에 지으려 하면 즉시 벌 (짓지 않음) — 비용에 비례해 커짐
+    public float rangeMargin = 0.5f;          // 판정 여유. 실제 사거리 = maxRange+0.5 이므로 0.5면 '중심이 n칸 안'
+                                              // = 그 칸을 온전히 때릴 수 있는 칸만 인정하게 된다.
     public float placementRefCost = 100f;      // 배치 벌·보상의 비용 스케일 기준 (그 타워 비용 ÷ 이 값 = 배율)
-    public float placementValueWeight = 0.02f; // 제대로(사거리 안) 지었을 때 보상 (비용에 비례) — 작게 유지
+    public float placementValueWeight = 0.06f; // 제대로 지었을 때 보상 (비용 × 새로 덮은 경로 칸 수에 비례)
+    public float coverageRefTiles = 5f;        // 새로 덮은 경로 칸이 이만큼이면 배치 보상 1배
+    public float coverageMaxMul = 2f;          // 배치 보상 배율 상한 (여러 경로가 겹치는 목 좋은 자리 = 최대 2배)
 
     [Header("한 종류 과다 배치 억제 (비용과 무관 — 종류 다양성 유도)")]
     public int sameTypeSoftCap = 3;                // 이 개수까진 벌 없음
@@ -78,6 +97,8 @@ public class PlacementAgent : Agent
         if (roundManager == null) roundManager = Object.FindFirstObjectByType<RoundManager>();
         pathProg = new float[gridW, gridH];
         pathProx = new float[gridW, gridH];
+        pathDens = new float[gridW, gridH];
+        enemyDens = new float[gridW, gridH];
         Debug.Log($"[배치AI] 기대 관측 수 = {gridW * gridH * CHANNELS + SCALARS} (Behavior Parameters의 Space Size와 같아야 함)");
     }
 
@@ -102,11 +123,15 @@ public class PlacementAgent : Agent
                 float towerHere = (t != null && t.type == TileType.Buildable && t.occupied) ? 1f : 0f;
                 float prog = (t != null) ? pathProg[x, y] : 0f;   // 경로면 입구≈작은값 → 골=1, 비경로=0
                 float prox = (t != null) ? pathProx[x, y] : 0f;   // 경로에 가까울수록 1
+                float dens = (t != null) ? pathDens[x, y] : 0f;   // 반경 안에 경로 칸이 많을수록 1 (목 좋은 자리)
+                float edns = (t != null) ? enemyDens[x, y] : 0f;  // 지금 이 근처에 적이 많을수록 1
                 sensor.AddObservation(buildableEmpty);
                 sensor.AddObservation(isPath);
                 sensor.AddObservation(towerHere);
                 sensor.AddObservation(prog);
                 sensor.AddObservation(prox);
+                sensor.AddObservation(dens);
+                sensor.AddObservation(edns);
             }
         }
 
@@ -224,10 +249,10 @@ public class PlacementAgent : Agent
 
         GameObject prefab = towerPrefabs[typeIdx];
         Tower data = prefab.GetComponent<Tower>();
-        float range = (data != null) ? data.maxRange : 3f;
+        float range = (data != null) ? data.AttackRange : 3.5f;   // 실제 타격 사거리(= maxRange + 0.5)
 
-        // 경계(딱 사거리)에 걸치면 실제론 발사가 잘 안 됨 → 여유(rangeMargin)를 빼서 판정한다.
-        // (사거리 n) − (여유) 안에 경로가 없으면 = 사실상 못 때리는 자리 → 짓지 않고 즉시 벌 (비용에 비례).
+        // 판정 여유(rangeMargin)를 빼서, '애매하게 걸치는 칸'이 아니라 '온전히 때릴 수 있는 칸'만 인정한다.
+        // 그런 칸이 하나도 없으면 = 사실상 쓸모없는 자리 → 짓지 않고 즉시 벌 (비용에 비례).
         float effectiveRange = Mathf.Max(0.1f, range - rangeMargin);
         if (!CoversAnyPath(x, y, effectiveRange))
         {
@@ -238,8 +263,8 @@ public class PlacementAgent : Agent
         int cost = g.GetScaledCost(PrefabCost(typeIdx));
         if (!g.CanAfford(cost)) return;
 
-        // 짓기 전에: 새 경로를 덮는 자리인지 + 이미 같은 종류가 몇 개인지
-        bool addsNew = AddsNewPathCoverage(tile, effectiveRange);
+        // 짓기 전에: '아무도 못 덮던 경로 칸'을 몇 개나 새로 덮는지 + 이미 같은 종류가 몇 개인지
+        int newCovered = CountNewPathCoverage(tile, effectiveRange);
         int sameTypeCount = CountTowersOfType(TypeName(typeIdx));
 
         g.SpendGold(cost);
@@ -249,9 +274,14 @@ public class PlacementAgent : Agent
         if (TowerUpgradeManager.Instance != null)
             TowerUpgradeManager.Instance.ApplyCurrentLevel(go.GetComponent<Tower>());
 
-        // 사거리 안 + '새 경로'를 덮을 때만 배치 보상 (이미 덮인 곳에 도배 시 0)
-        if (addsNew)
-            AddReward(placementValueWeight * costNorm);
+        // 배치 보상 = 비용배율 × (새로 덮은 경로 칸 수 / 기준). 이미 덮인 곳에 도배하면 0.
+        // → 경로가 접히거나 여러 구간이 몰린 '목 좋은 자리'가 한 번에 여러 칸을 덮어 더 큰 보상을 받는다.
+        //   (단순히 경로에 붙어 있기만 한 자리는 1~2칸이라 보상이 작다)
+        if (newCovered > 0)
+        {
+            float covMul = Mathf.Min(coverageMaxMul, newCovered / Mathf.Max(1f, coverageRefTiles));
+            AddReward(placementValueWeight * costNorm * covMul);
+        }
 
         // 한 종류를 soft cap 넘게 쌓으면 초과분에 누적 벌 (비용과 무관, 종류 다양성 유도)
         if (sameTypeCount >= sameTypeSoftCap)
@@ -297,12 +327,24 @@ public class PlacementAgent : Agent
         float active = towerCount * Mathf.Clamp01(utilization);
         r += towerActivityWeight * Mathf.Clamp01(active / Mathf.Max(1f, activeRefCount));
 
+        // (4) 하한 보장 — 라운드를 넘겼다는 사실 자체는 항상 +.
+        //     이게 없으면 후반(DDA 목표손실 14%) 라운드가 전부 마이너스가 되어
+        //     '빨리 죽어서 에피소드를 끝내기'가 최적 정책이 된다.
+        r = Mathf.Max(minRoundReward, r);
+
         AddReward(r);
     }
 
+    // 라운드 패배 = 큰 벌. 남은 라운드가 많을수록(=일찍 포기할수록) 더 아프게 한다.
+    // 1라운드에 포기 = -deathPenalty×2, 마지막 라운드에서 사망 = -deathPenalty×1.
     public void GradeDied()
     {
-        AddReward(-deathPenalty); // 라운드 패배 = 큰 벌
+        int rounds = (roundManager != null) ? Mathf.Max(1, roundManager.RoundsPerStage) : 1;
+        int cur = (roundManager != null) ? roundManager.CurrentRound : 0;
+        float remainFrac = (rounds > 1) ? Mathf.Clamp01((rounds - 1 - cur) / (float)(rounds - 1)) : 0f;
+        float p = deathPenalty * (1f + giveUpWeight * remainFrac);
+        AddReward(-p);
+        Debug.Log($"[배치AI:사망] R{cur + 1}/{rounds} 남은비율 {remainFrac:0.00} → {-p:0.00}");
     }
 
     // 스테이지 클리어: 기본 보너스 + 고스테이지 가중 (조금 더 큰 보상)
@@ -382,17 +424,19 @@ public class PlacementAgent : Agent
         return false;
     }
 
-    // 이 자리에 지으면 '아직 어떤 타워도 못 덮던 경로 칸'을 새로 덮는가? (월드 좌표 기준)
-    // 이미 덮인 경로에 겹쳐 지으면 false → 배치 보상 없음 (도배 파밍 방지)
-    bool AddsNewPathCoverage(Tile tile, float myRange)
+    // 이 자리에 지으면 '아직 어떤 타워도 못 덮던 경로 칸'을 몇 개나 새로 덮는가? (월드 좌표 기준)
+    // 이미 덮인 경로에 겹쳐 지으면 0 → 배치 보상 없음 (도배 파밍 방지).
+    // 뱀형 경로가 접히는 자리는 한 타워가 여러 구간을 동시에 덮어 이 값이 크게 나온다.
+    int CountNewPathCoverage(Tile tile, float myRange)
     {
-        if (grid == null || tile == null) return false;
+        if (grid == null || tile == null) return 0;
         var pathWorld = grid.GetPathWorldPoints();
-        if (pathWorld == null || pathWorld.Count == 0) return false;
+        if (pathWorld == null || pathWorld.Count == 0) return 0;
 
         Tower[] towers = Object.FindObjectsByType<Tower>(FindObjectsSortMode.None);
         Vector3 myPos = tile.transform.position; myPos.y = 0f;
 
+        int count = 0;
         foreach (Vector3 pw in pathWorld)
         {
             Vector3 pp = pw; pp.y = 0f;
@@ -402,13 +446,13 @@ public class PlacementAgent : Agent
             foreach (Tower t in towers)
             {
                 if (t == null) continue;
-                float te = Mathf.Max(0.1f, t.maxRange - rangeMargin); // 기존 타워의 유효 사거리
+                float te = Mathf.Max(0.1f, t.AttackRange - rangeMargin); // 기존 타워의 유효 사거리
                 Vector3 tp = t.transform.position; tp.y = 0f;
                 if (Vector3.Distance(tp, pp) <= te) { already = true; break; }
             }
-            if (!already) return true; // 아무도 못 덮던 칸을 새로 덮음
+            if (!already) count++; // 아무도 못 덮던 칸을 새로 덮음
         }
-        return false;
+        return count;
     }
 
     // 이번 판 경로 기준으로 진행도/근접도 맵을 다시 계산
@@ -416,9 +460,14 @@ public class PlacementAgent : Agent
     {
         if (pathProg == null) pathProg = new float[gridW, gridH];
         if (pathProx == null) pathProx = new float[gridW, gridH];
+        if (pathDens == null) pathDens = new float[gridW, gridH];
+        if (enemyDens == null) enemyDens = new float[gridW, gridH];
 
         for (int x = 0; x < gridW; x++)
-            for (int y = 0; y < gridH; y++) { pathProg[x, y] = 0f; pathProx[x, y] = 0f; }
+            for (int y = 0; y < gridH; y++)
+            { pathProg[x, y] = 0f; pathProx[x, y] = 0f; pathDens[x, y] = 0f; enemyDens[x, y] = 0f; }
+
+        RebuildEnemyDensity();
 
         var pl = (grid != null) ? grid.pathCoords : null;
         int n = (pl != null) ? pl.Count : 0;
@@ -432,18 +481,38 @@ public class PlacementAgent : Agent
                 pathProg[c.x, c.y] = (i + 1) / (float)n;
         }
 
-        // 근접도: 가장 가까운 경로 타일까지 거리 → 가까울수록 1 (PROX_REF 이상이면 0)
+        // 근접도(가장 가까운 경로까지) + 밀집도(반경 안 경로 칸 수)를 한 번에 계산
+        float dr2 = densityRefRange * densityRefRange;
         for (int x = 0; x < gridW; x++)
             for (int y = 0; y < gridH; y++)
             {
                 float best = float.MaxValue;
+                int within = 0;
                 for (int i = 0; i < n; i++)
                 {
                     float dx = pl[i].x - x, dy = pl[i].y - y;
-                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    float sq = dx * dx + dy * dy;
+                    if (sq <= dr2) within++;              // 밀집도: 반경 안 경로 칸 수
+                    float d = Mathf.Sqrt(sq);
                     if (d < best) best = d;
                 }
                 pathProx[x, y] = Mathf.Clamp01(1f - best / PROX_REF);
+                pathDens[x, y] = Mathf.Clamp01(within / Mathf.Max(1f, densityRefTiles));
             }
+    }
+
+    // 지금 필드에 있는 적들을 타일 격자로 집계 (전투 중 판단용 관측)
+    void RebuildEnemyDensity()
+    {
+        if (grid == null) return;
+        Enemy[] all = Object.FindObjectsByType<Enemy>(FindObjectsSortMode.None);
+        if (all.Length == 0) return;
+        foreach (Enemy e in all)
+        {
+            if (e == null) continue;
+            Vector2Int c = grid.WorldToGrid(e.transform.position);
+            if (c.x < 0 || c.x >= gridW || c.y < 0 || c.y >= gridH) continue;
+            enemyDens[c.x, c.y] = Mathf.Clamp01(enemyDens[c.x, c.y] + 1f / enemyDensRefCount);
+        }
     }
 }

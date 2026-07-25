@@ -165,7 +165,7 @@ public class BuildManager : MonoBehaviour
         EnsureRangeCircle();
         selectedTower = t;
         Vector3 center = t.transform.position; center.y += rangeHeight;
-        float radius = Mathf.Max(0.1f, t.maxRange);
+        float radius = Mathf.Max(0.1f, t.AttackRange);  // 보이는 원 = 실제 타격 범위
         for (int i = 0; i < RANGE_SEGMENTS; i++)
         {
             float ang = (i / (float)RANGE_SEGMENTS) * Mathf.PI * 2f;
