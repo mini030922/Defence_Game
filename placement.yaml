@@ -1,0 +1,28 @@
+# Placement AI (optimal tower placement) training config - PPO
+# Observations = GRID_W*GRID_H*5 + 12 (default 20*16*5+12 = 1612, vector).
+# Actions = 3 discrete branches: [1+2*towerTypes, GRID_W, GRID_H] = default [11, 20, 16]
+# Behavior Name must be: Placement
+behaviors:
+  Placement:
+    trainer_type: ppo
+    hyperparameters:
+      batch_size: 512
+      buffer_size: 5120
+      learning_rate: 0.0003
+      beta: 0.01
+      epsilon: 0.2
+      lambd: 0.95
+      num_epoch: 3
+      learning_rate_schedule: linear
+    network_settings:
+      normalize: true
+      hidden_units: 256
+      num_layers: 2
+    reward_signals:
+      extrinsic:
+        gamma: 0.99
+        strength: 1.0
+    keep_checkpoints: 5
+    max_steps: 3000000
+    time_horizon: 64
+    summary_freq: 2000
