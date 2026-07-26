@@ -27489,6 +27489,7 @@ MonoBehaviour:
   hardTargetLoss: 0.14
   difficultyCurve: 1.5
   maxStageForTarget: 10
+  lossTolerance: 0.05
   earlyProtectStage: 2
   earlyProtectRound: 3
   earlyLossPenaltyScale: 18
@@ -27500,6 +27501,8 @@ MonoBehaviour:
   intensityStep: 0.2
   maxHealthMultiplier: 2
   healthStep: 0.15
+  easyMaxIntensity: 1.3
+  easyMaxHealthMultiplier: 1.2
   minUtil: 0.3
   utilPenaltyWeight: 0.6
   intensity: 1
@@ -27530,7 +27533,7 @@ MonoBehaviour:
     VectorActionDescriptions: []
     VectorActionSpaceType: 1
     hasUpgradedBrainParametersWithActionSpec: 1
-  m_Model: {fileID: 5022602860645237092, guid: 2859ec9064dade14390993ee0123e6a0, type: 3}
+  m_Model: {fileID: 5022602860645237092, guid: 89ddc8c83af2bbf46a1b1ac364aea041, type: 3}
   m_InferenceDevice: 0
   m_BehaviorType: 2
   m_BehaviorName: Difficulty

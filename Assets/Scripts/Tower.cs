@@ -20,6 +20,15 @@ public class Tower : MonoBehaviour
     public float rangeBonus = 0.5f;
     public float AttackRange => maxRange + rangeBonus;
 
+    // 보상·관측의 '경로 커버리지' 계산에만 쓰는 사거리 상한. 조준(FindTarget)은 AttackRange 그대로 사용.
+    // 미사일 타워는 maxRange가 999(맵 전체 최고체력 저격)라 그대로 커버리지에 쓰면:
+    //   - 맵 어디에 지어도 경로 전체를 덮는 것으로 계산돼 거리 가중이 무의미해지고
+    //   - 미사일 하나만 지으면 그 뒤 모든 타워의 배치 보상이 0이 되고 (전부 '이미 덮인 곳' 처리)
+    //   - uselessTowerPenalty가 미사일엔 절대 안 걸리고
+    //   - GameStateCollector의 경로커버 관측이 항상 1.0으로 고정된다.
+    public float coverageRangeCap = 8f;
+    public float CoverageRange => Mathf.Min(AttackRange, coverageRangeCap);
+
     // 이 타워가 실제로 가동을 시작한 시각 (전투 중에 지어진 타워의 가동률을 공정하게 계산하기 위함)
     [System.NonSerialized] public float activeSince;
 

@@ -284,6 +284,16 @@ public class RoundManager : MonoBehaviour
         }
     }
 
+    // ── 종류별 '위협 비용' (예산제의 환율) ────────────────────────────────
+    // 탱커만 roundHealthGrowth=0.30이라 라운드마다 체력이 30%씩 누적되는데 비용이 2.5로 고정이었다.
+    // 그 결과 예산 1점당 체력이 3라운드 1.9배 · 5라운드 2.6배 · 10라운드 4.4배가 되어
+    // DDA가 "탱커에 전부 몰기"를 최적 정책으로 학습했다(= 탱커만 나오는 라운드).
+    // 비용이 실제 강함을 따라 오르게 만들어 예산 시스템이 거짓말을 하지 않게 한다.
+    public float ThreatCost(EnemyType t, int roundIdx)
+    {
+        return Mathf.Max(0.1f, t.cost * (1f + t.roundHealthGrowth * Mathf.Max(0, roundIdx)));
+    }
+
     // 에이전트가 정한 예산·가중치·체력으로 이번 라운드 구성 생성
     RoundData BuildRound(int i)
     {
@@ -314,7 +324,7 @@ public class RoundManager : MonoBehaviour
         for (int t = 0; t < n; t++)
         {
             float budgetT = totalBudget * (w[t] / wsum);
-            float c = Mathf.Max(0.1f, enemyTypes[t].cost);
+            float c = ThreatCost(enemyTypes[t], i);   // 라운드 성장을 반영한 비용
             counts.Add(Mathf.Max(0, Mathf.RoundToInt(budgetT / c)));
         }
 
@@ -333,9 +343,11 @@ public class RoundManager : MonoBehaviour
             typeName = "일반", healthMultiplier = 1f, speedMultiplier = 1f,
             scale = 0.5f, color = new Color(0.85f, 0.3f, 0.3f), cost = 1.0f, leakDamageFraction = 0.05f
         });
+        // 빠름 비용 1.4 → 1.1: 속도 1.8배라 사거리 안에 머무는 시간이 절반뿐인데(=실효 생존력이 높은데)
+        // 비용이 1.4로 매겨져 예산 대비 가치가 꼴찌였다. DDA가 아예 안 고르는 '죽은 카드'였음.
         enemyTypes.Add(new EnemyType {
             typeName = "빠름", healthMultiplier = 0.6f, speedMultiplier = 1.8f,
-            scale = 0.4f, color = new Color(0.95f, 0.85f, 0.2f), cost = 1.4f, leakDamageFraction = 0.04f
+            scale = 0.4f, color = new Color(0.95f, 0.85f, 0.2f), cost = 1.1f, leakDamageFraction = 0.04f
         });
         enemyTypes.Add(new EnemyType {
             typeName = "탱커", healthMultiplier = 3f, speedMultiplier = 0.6f,
@@ -378,10 +390,12 @@ public class RoundManager : MonoBehaviour
         float roundGrow = 1f + type.roundHealthGrowth * currentRound;
         float health = baseTypeHealth * roundGrow;
         float speed = round.baseSpeed * type.speedMultiplier;
-        // 처치 골드 = 적의 '위협도(종류 비용)' × 스테이지 완만 성장. 체력과 분리해 후반 소득 폭증을 막는다.
+        // 처치 골드 = 적의 '위협도' × 스테이지 완만 성장. (적 체력 배율과는 여전히 분리 → 후반 소득 폭증 방지)
+        // 위협 비용과 같은 값을 쓰므로 예산 1점당 수입이 종류와 무관하게 같아진다.
+        // → DDA가 구성(탱커 몰기)으로 플레이어의 경제를 말려 죽이는 경로가 막힌다.
         int stg = GameManager.stage;
         float stageFactor = 1f + killRewardStageGrowth * Mathf.Max(0, stg - 1);
-        int reward = Mathf.Max(1, Mathf.RoundToInt(killRewardBase * type.cost * stageFactor));
+        int reward = Mathf.Max(1, Mathf.RoundToInt(killRewardBase * ThreatCost(type, currentRound) * stageFactor));
 
         GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         go.name = $"Enemy_{type.typeName}";

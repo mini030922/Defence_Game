@@ -23,6 +23,10 @@ public class DifficultyAgent : Agent
     public float hardTargetLoss = 0.14f;    // 최후반(가혹, 완벽해야 겨우 생존 → 합계 ~140%)
     public float difficultyCurve = 1.5f;    // 클수록 어려움이 후반에 몰림(9~10스테이지 급가혹)
     public int maxStageForTarget = 10;
+    // 목표 손실 판정의 여유폭. 분모를 (목표 + 이 값)으로 만들어 '손실 0'도 부분 점수를 받게 한다.
+    // 0이면 손실 0 = 0점 / 1누수 = +0.9점이 되어, DDA가 누수를 억지로 짜내려고
+    // 난이도를 상한까지 폭주시킨다(강도는 단조 증가라 되돌릴 수도 없다). 0.05면 손실 0도 약 +0.47점.
+    public float lossTolerance = 0.05f;
 
     [Header("보상: 초반 보호 (1~2스테이지 1~3라운드는 체력 손실 = 큰 벌)")]
     public int earlyProtectStage = 2;         // 이 스테이지 이하에서
@@ -39,10 +43,24 @@ public class DifficultyAgent : Agent
     // 예전엔 Mathf.Max(원하는값, 직전값)이라 1라운드에 우연히 2.0이 나오면 남은 라운드의
     // 행동이 통째로 무시(검열)됐다 → 행동↔결과 연결이 끊겨 학습 불가.
     // 이제는 '이번 라운드에 얼마나 올릴지(0~step)'를 정하는 방식 → 매 라운드 행동이 반영된다.
-    public float maxIntensity = 2f;         // 강도 상한
-    public float intensityStep = 0.2f;      // 라운드당 최대 강도 상승폭 (10라운드면 최대 +2.0까지 시도 가능)
-    public float maxHealthMultiplier = 2f;  // 체력 배율 상한
+    public float maxIntensity = 2f;         // **최고 스테이지**에서의 강도 상한
+    public float intensityStep = 0.2f;      // 라운드당 최대 강도 상승폭
+    public float maxHealthMultiplier = 2f;  // **최고 스테이지**에서의 체력 배율 상한
     public float healthStep = 0.15f;        // 라운드당 최대 체력 배율 상승폭
+
+    [Header("행동: 스테이지별 난이도 상한 (GDD의 '1~3스테이지는 쉬움'을 구조로 보장)")]
+    // 예전엔 1스테이지에서도 DDA가 쓸 수 있는 범위가 10스테이지와 똑같이 1.0~2.0이었다.
+    // 강도는 단조 증가라 한 번 올리면 못 내리는데, 강한 플레이어를 만나면 상한까지 밀어붙인 뒤
+    // 그대로 굳어서 초반 스테이지조차 6~7라운드부터 갑자기 못 깨지게 됐다.
+    // → DDA가 쥔 칼 자체를 스테이지에 비례시켜 천장을 만든다.
+    //   1스테이지 최대 1.30×1.20 = 1.56배 / 10스테이지 최대 2.00×2.00 = 4.00배
+    public float easyMaxIntensity = 1.3f;        // 1스테이지에서의 강도 상한
+    public float easyMaxHealthMultiplier = 1.2f; // 1스테이지에서의 체력 배율 상한
+
+    // 현재 스테이지에서 실제로 허용되는 상한 (관측 정규화에도 같은 값을 쓴다)
+    float StageNorm01 => Mathf.Clamp01((GameManager.stage - 1) / (float)Mathf.Max(1, maxStageForTarget - 1));
+    public float CurMaxIntensity => Mathf.Lerp(easyMaxIntensity, maxIntensity, StageNorm01);
+    public float CurMaxHealthMultiplier => Mathf.Lerp(easyMaxHealthMultiplier, maxHealthMultiplier, StageNorm01);
 
     [Header("보상: 타워 가동률 페널티 (놀던 타워 많으면 = 너무 쉬움)")]
     public float minUtil = 0.3f;            // 가동률이 이 값 미만이면 마이너스 보상
@@ -98,8 +116,9 @@ public class DifficultyAgent : Agent
         sensor.AddObservation(roundNorm);
         // (2)(3) 자기가 지금까지 올려둔 난이도. 라운드를 넘어 누적되는 상태라 관찰이 없으면 부분관측.
         //        (CollectObservations는 OnActionReceived보다 먼저 불리므로 '직전 라운드까지의 값'이다)
-        sensor.AddObservation(Mathf.InverseLerp(1f, maxIntensity, intensity));
-        sensor.AddObservation(Mathf.InverseLerp(1f, maxHealthMultiplier, healthMultiplier));
+        // (상한이 스테이지마다 다르므로 '지금 스테이지의 상한 대비 어디까지 올렸나'로 정규화한다)
+        sensor.AddObservation(Mathf.InverseLerp(1f, CurMaxIntensity, intensity));
+        sensor.AddObservation(Mathf.InverseLerp(1f, CurMaxHealthMultiplier, healthMultiplier));
     }
 
     // 에이전트의 행동을 받아 다음 라운드 난이도 배율로 변환
@@ -109,7 +128,7 @@ public class DifficultyAgent : Agent
         // a0: 이번 라운드 강도 상승폭(0~intensityStep), a1~a3: 종류별 가중치, a4: 체력 상승폭
         // → 값 자체가 아니라 '증분'을 정하므로 단조 증가를 지키면서도 매 라운드 행동이 반영된다.
         float upI = Mathf.Clamp01((a[0] + 1f) * 0.5f) * intensityStep;
-        intensity = Mathf.Clamp(prevIntensity + upI, 1f, maxIntensity);
+        intensity = Mathf.Clamp(prevIntensity + upI, 1f, CurMaxIntensity);
         prevIntensity = intensity;
 
         typeWeights[0] = Mathf.Clamp01((a[1] + 1f) * 0.5f);
@@ -117,7 +136,7 @@ public class DifficultyAgent : Agent
         typeWeights[2] = Mathf.Clamp01((a[3] + 1f) * 0.5f);
 
         float upH = Mathf.Clamp01((a[4] + 1f) * 0.5f) * healthStep;
-        healthMultiplier = Mathf.Clamp(prevHealth + upH, 1f, maxHealthMultiplier);
+        healthMultiplier = Mathf.Clamp(prevHealth + upH, 1f, CurMaxHealthMultiplier);
         prevHealth = healthMultiplier;
 
         Debug.Log($"[난이도] 강도 {intensity:0.00}(+{upI:0.00}) · 가중치 [{typeWeights[0]:0.0}/{typeWeights[1]:0.0}/{typeWeights[2]:0.0}] · 체력 {healthMultiplier:0.00}(+{upH:0.00})");
@@ -176,7 +195,8 @@ public class DifficultyAgent : Agent
         {
             // 목표 손실도 곡선에 따라: 중반 살살(easy=1누수), 후반 급가혹(hard)
             float target = Mathf.Lerp(easyTargetLoss, hardTargetLoss, Dc);
-            reward = 1f - Mathf.Abs(lossFraction - target) / target;
+            float denom = Mathf.Max(0.01f, target + lossTolerance); // 여유폭 → 손실 0도 부분 점수
+            reward = 1f - Mathf.Abs(lossFraction - target) / denom;
 
             // 타워 가동률이 minUtil(0.3) 미만이면 마이너스 페널티: 낮을수록 더 큰 벌.
             // 단, 초반(Dc≈0)은 적이 적어 타워가 노는 게 정상 → Dc를 곱해 후반일수록만 세게 문다.

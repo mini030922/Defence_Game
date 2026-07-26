@@ -108,7 +108,8 @@ public class GameStateCollector : MonoBehaviour
             {
                 Vector3 a = p; a.y = 0f;
                 Vector3 b = t.transform.position; b.y = 0f;
-                if (Vector3.Distance(a, b) <= t.maxRange)
+                // 조준 사거리가 아니라 커버리지용 상한(미사일 999 방지)을 쓴다
+                if (Vector3.Distance(a, b) <= t.CoverageRange)
                 {
                     covered++;
                     break;

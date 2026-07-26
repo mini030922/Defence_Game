@@ -71,8 +71,13 @@ public class PlacementAgent : Agent
     public float rangeMargin = 0.5f;          // 판정 여유. 실제 사거리 = maxRange+0.5 이므로 0.5면 '중심이 n칸 안'
                                               // = 그 칸을 온전히 때릴 수 있는 칸만 인정하게 된다.
     public float placementRefCost = 100f;      // 배치 벌·보상의 비용 스케일 기준 (그 타워 비용 ÷ 이 값 = 배율)
-    public float placementValueWeight = 0.06f; // 제대로 지었을 때 보상 (비용 × 새로 덮은 경로 칸 수에 비례)
-    public float coverageRefTiles = 5f;        // 새로 덮은 경로 칸이 이만큼이면 배치 보상 1배
+    public float placementValueWeight = 0.06f; // 제대로 지었을 때 보상 (비용 × 새로 덮은 경로의 '가중치 합'에 비례)
+    // v4: 이진 판정(사거리 안이면 전부 1칸) → **거리 가중**으로 변경.
+    //     같은 칸 수를 덮어도 경로를 바짝 끼고 지은 자리가 멀찍이서 걸치기만 한 자리보다 높은 점수를 받는다.
+    //     가까울수록 적이 사거리 안에 머무는 시간이 길고 투사체가 빗나갈 확률도 낮으므로 실제로 더 가치 있다.
+    //     칸 가중치 = (1 − 거리/유효사거리) ^ coverageFalloffPower   (거리 0 → 1.0, 유효사거리 끝 → 0)
+    public float coverageFalloffPower = 1f;    // 1=선형. 올릴수록 '바짝 붙이기'를 더 강하게 선호
+    public float coverageRefWeight = 3f;       // 새로 덮은 가중치 합이 이만큼이면 배치 보상 1배
     public float coverageMaxMul = 2f;          // 배치 보상 배율 상한 (여러 경로가 겹치는 목 좋은 자리 = 최대 2배)
 
     [Header("한 종류 과다 배치 억제 (비용과 무관 — 종류 다양성 유도)")]
@@ -249,7 +254,8 @@ public class PlacementAgent : Agent
 
         GameObject prefab = towerPrefabs[typeIdx];
         Tower data = prefab.GetComponent<Tower>();
-        float range = (data != null) ? data.AttackRange : 3.5f;   // 실제 타격 사거리(= maxRange + 0.5)
+        // 커버리지 계산용 사거리(= min(실제 타격 사거리, coverageRangeCap)). 미사일 999가 새지 않게.
+        float range = (data != null) ? data.CoverageRange : 3.5f;
 
         // 판정 여유(rangeMargin)를 빼서, '애매하게 걸치는 칸'이 아니라 '온전히 때릴 수 있는 칸'만 인정한다.
         // 그런 칸이 하나도 없으면 = 사실상 쓸모없는 자리 → 짓지 않고 즉시 벌 (비용에 비례).
@@ -263,8 +269,8 @@ public class PlacementAgent : Agent
         int cost = g.GetScaledCost(PrefabCost(typeIdx));
         if (!g.CanAfford(cost)) return;
 
-        // 짓기 전에: '아무도 못 덮던 경로 칸'을 몇 개나 새로 덮는지 + 이미 같은 종류가 몇 개인지
-        int newCovered = CountNewPathCoverage(tile, effectiveRange);
+        // 짓기 전에: '아무도 못 덮던 경로'를 얼마나 새로 덮는지(거리 가중 합) + 이미 같은 종류가 몇 개인지
+        float newCovered = WeightedNewPathCoverage(tile, effectiveRange);
         int sameTypeCount = CountTowersOfType(TypeName(typeIdx));
 
         g.SpendGold(cost);
@@ -274,13 +280,16 @@ public class PlacementAgent : Agent
         if (TowerUpgradeManager.Instance != null)
             TowerUpgradeManager.Instance.ApplyCurrentLevel(go.GetComponent<Tower>());
 
-        // 배치 보상 = 비용배율 × (새로 덮은 경로 칸 수 / 기준). 이미 덮인 곳에 도배하면 0.
-        // → 경로가 접히거나 여러 구간이 몰린 '목 좋은 자리'가 한 번에 여러 칸을 덮어 더 큰 보상을 받는다.
-        //   (단순히 경로에 붙어 있기만 한 자리는 1~2칸이라 보상이 작다)
-        if (newCovered > 0)
+        // 배치 보상 = 비용배율 × (새로 덮은 경로의 거리가중 합 / 기준). 이미 덮인 곳에 도배하면 0.
+        // → ① 경로가 접히거나 여러 구간이 몰린 '목 좋은 자리'가 한 번에 여러 칸을 덮어 크게 받고
+        //    ② 같은 칸 수라도 경로를 바짝 끼고 지은 자리가 멀리서 걸친 자리보다 크게 받는다.
+        // ※ 여기엔 costNorm을 곱하지 않는다. 벌(잘못 지으면 손해가 큼)에는 비용 비례가 타당하지만
+        //   보상에 비용을 곱하면 '비싸고 사거리 넓은 타워를 짓는 것' 자체가 이득이 되어
+        //   지원(costNorm 1.6, DPS 0.33)·미사일(costNorm 3.0) 파밍 경사가 생긴다.
+        if (newCovered > 0f)
         {
-            float covMul = Mathf.Min(coverageMaxMul, newCovered / Mathf.Max(1f, coverageRefTiles));
-            AddReward(placementValueWeight * costNorm * covMul);
+            float covMul = Mathf.Min(coverageMaxMul, newCovered / Mathf.Max(0.1f, coverageRefWeight));
+            AddReward(placementValueWeight * covMul);
         }
 
         // 한 종류를 soft cap 넘게 쌓으면 초과분에 누적 벌 (비용과 무관, 종류 다양성 유도)
@@ -424,35 +433,41 @@ public class PlacementAgent : Agent
         return false;
     }
 
-    // 이 자리에 지으면 '아직 어떤 타워도 못 덮던 경로 칸'을 몇 개나 새로 덮는가? (월드 좌표 기준)
+    // 이 자리에 지으면 '아직 어떤 타워도 못 덮던 경로'를 얼마나 새로 덮는가? (월드 좌표 기준)
+    // 칸 수를 그냥 세지 않고 **거리로 가중**한다: 가까운 경로 칸일수록 1.0에 가깝고, 유효사거리 끝은 0.
+    //   → 같은 칸 수를 덮어도 '바짝 끼고 지은 자리'가 '멀리서 걸치기만 한 자리'보다 높은 점수를 받는다.
     // 이미 덮인 경로에 겹쳐 지으면 0 → 배치 보상 없음 (도배 파밍 방지).
     // 뱀형 경로가 접히는 자리는 한 타워가 여러 구간을 동시에 덮어 이 값이 크게 나온다.
-    int CountNewPathCoverage(Tile tile, float myRange)
+    float WeightedNewPathCoverage(Tile tile, float myRange)
     {
-        if (grid == null || tile == null) return 0;
+        if (grid == null || tile == null) return 0f;
         var pathWorld = grid.GetPathWorldPoints();
-        if (pathWorld == null || pathWorld.Count == 0) return 0;
+        if (pathWorld == null || pathWorld.Count == 0) return 0f;
 
         Tower[] towers = Object.FindObjectsByType<Tower>(FindObjectsSortMode.None);
         Vector3 myPos = tile.transform.position; myPos.y = 0f;
 
-        int count = 0;
+        float sum = 0f;
         foreach (Vector3 pw in pathWorld)
         {
             Vector3 pp = pw; pp.y = 0f;
-            if (Vector3.Distance(myPos, pp) > myRange) continue; // 내가 못 덮는 칸은 패스
+            float d = Vector3.Distance(myPos, pp);
+            if (d > myRange) continue; // 내가 못 덮는 칸은 패스
 
             bool already = false;
             foreach (Tower t in towers)
             {
                 if (t == null) continue;
-                float te = Mathf.Max(0.1f, t.AttackRange - rangeMargin); // 기존 타워의 유효 사거리
+                float te = Mathf.Max(0.1f, t.CoverageRange - rangeMargin); // 기존 타워의 커버리지 사거리
                 Vector3 tp = t.transform.position; tp.y = 0f;
                 if (Vector3.Distance(tp, pp) <= te) { already = true; break; }
             }
-            if (!already) count++; // 아무도 못 덮던 칸을 새로 덮음
+            if (already) continue;
+
+            // 거리 가중: 거리 0 → 1.0, 유효사거리 끝 → 0
+            sum += Mathf.Pow(Mathf.Clamp01(1f - d / myRange), coverageFalloffPower);
         }
-        return count;
+        return sum;
     }
 
     // 이번 판 경로 기준으로 진행도/근접도 맵을 다시 계산
