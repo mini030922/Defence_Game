@@ -9,7 +9,9 @@ using UnityEngine;
 public class TowerUpgradeManager : MonoBehaviour
 {
     [Header("업그레이드 비용 (종류별 — 그 타워의 건설비 기준, 보유 수 무관)")]
-    public float upgradeCostFactor = 2.0f;  // 첫 업그레이드 = 타워 건설비 × 이 값 (8번째 설치비(×2.05) 살짝 아래)
+    // 2.0 → 1.5 (2026-07-26): 2.0이면 첫 업그레이드가 신축보다 비싸서, 즉시 보상까지 없는 배치 AI가
+    // 업그레이드 행동을 아예 학습하지 못했다(plc_v5 로그에서 모든 타워가 레벨 0으로 확인).
+    public float upgradeCostFactor = 1.5f;  // 첫 업그레이드 = 타워 건설비 × 이 값
     public float costGrowthPerLevel = 0.6f; // 레벨당 추가 배율 (× 타워 건설비)
     public int maxLevel = 5;                // 종류당 최대 레벨
     public int fallbackTowerCost = 100;     // 그 종류 타워를 씬에서 못 찾을 때 기본 건설비

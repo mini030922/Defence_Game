@@ -17,6 +17,16 @@ public struct GameState
     public float towerUtilization;  // 직전 라운드 타워 평균 가동률 (0~1, 낮으면 놀던 타워 많음)
     public int pathLength;          // 경로 칸 수 (맵 난이도: 길수록 타워가 쏠 시간 많아 쉬움)
 
+    // ── 아래는 DDA 관측 보강용 (2026-07-26 추가) ──────────────────────────
+    public float lastRoundLinger;      // 스폰 완료 후 소탕까지 걸린 시간(초). '여유' 지표 —
+                                       // 체력을 안 잃어도 간신히 잡았는지 압살했는지를 구분한다.
+    public float lastRoundSlowRatio;   // 감속을 건 적 / 스폰된 적 (0~1). 지원 타워의 간접 기여.
+    public int   lastRoundMaxAlive;    // 라운드 중 최대 동시 생존 적 수 (필드가 얼마나 밀렸나)
+    public float lastRoundMaxProgress; // 적이 도달한 최대 경로 진행도 (0~1). 안 샜어도 골 앞까지 갔는지.
+    public float pathFoldRatio;        // 경로 접힘 정도 (일직선=낮음, 뱀형=높음). 같은 칸 수라도 체감 난이도가 다르다.
+    public int[] towerCountByType;     // 종류별 타워 수 (5). 플레이어 '구성'을 알아야 반례 적을 보낼 수 있다.
+    public int[] upgradeLevelByType;   // 종류별 업그레이드 레벨 (5). 같은 DPS라도 적은 수+고레벨과 많은 수+0레벨은 다른 상대.
+
     // 강화학습에 넣을 순수 숫자 벡터 (순서 고정)
     public float[] ToVector()
     {
@@ -49,16 +59,41 @@ public struct GameState
 public class GameStateCollector : MonoBehaviour
 {
     public GridManager grid;   // 비우면 자동으로 찾음
+    public GameObject[] towerPrefabs; // 종류 순서 기준. 비우면 BuildManager에서 자동으로 가져옴
+
+    [Header("경로 접힘 정도 계산")]
+    public float foldRadius = 3f;       // 각 경로 칸 주변 이 반경 안의 다른 경로 칸을 센다
+    public float foldRefNeighbors = 12f;// 평균 이웃 수가 이만큼이면 1.0 (일직선은 대략 6)
 
     // 직전 라운드 결과 (RoundManager가 라운드 종료 시 채워준다)
     [HideInInspector] public int lastRoundLeaked = 0;
     [HideInInspector] public int lastRoundHealthLost = 0;
     [HideInInspector] public float lastRoundTowerUtilization = 0f;
+    [HideInInspector] public float lastRoundLinger = 0f;
+    [HideInInspector] public float lastRoundSlowRatio = 0f;
+    [HideInInspector] public int lastRoundMaxAlive = 0;
+    [HideInInspector] public float lastRoundMaxProgress = 0f;
 
     void Start()
     {
         if (grid == null)
             grid = Object.FindFirstObjectByType<GridManager>();
+        EnsureTowerTypes();
+    }
+
+    // 타워 종류 순서를 BuildManager에서 가져온다 (배치 AI와 같은 순서를 쓰기 위함)
+    void EnsureTowerTypes()
+    {
+        if (towerPrefabs != null && towerPrefabs.Length > 0) return;
+        BuildManager bm = Object.FindFirstObjectByType<BuildManager>();
+        if (bm != null && bm.towerPrefabs != null) towerPrefabs = bm.towerPrefabs;
+    }
+
+    string TypeName(int idx)
+    {
+        if (towerPrefabs == null || idx < 0 || idx >= towerPrefabs.Length || towerPrefabs[idx] == null) return "";
+        Tower t = towerPrefabs[idx].GetComponent<Tower>();
+        return (t != null && !string.IsNullOrEmpty(t.towerName)) ? t.towerName : towerPrefabs[idx].name;
     }
 
     // 현재 게임 상태를 관찰 벡터로 조립한다
@@ -91,7 +126,50 @@ public class GameStateCollector : MonoBehaviour
         gs.towerUtilization = lastRoundTowerUtilization;
         gs.pathLength = (grid != null && grid.pathCoords != null) ? grid.pathCoords.Count : 0;
 
+        // ── DDA 관측 보강분 ─────────────────────────────
+        gs.lastRoundLinger = lastRoundLinger;
+        gs.lastRoundSlowRatio = lastRoundSlowRatio;
+        gs.lastRoundMaxAlive = lastRoundMaxAlive;
+        gs.lastRoundMaxProgress = lastRoundMaxProgress;
+        gs.pathFoldRatio = ComputeFoldRatio();
+
+        EnsureTowerTypes();
+        gs.towerCountByType = new int[5];
+        gs.upgradeLevelByType = new int[5];
+        var upm = TowerUpgradeManager.Instance;
+        for (int i = 0; i < 5; i++)
+        {
+            string nm = TypeName(i);
+            if (string.IsNullOrEmpty(nm)) continue;
+            int c = 0;
+            foreach (Tower t in towers) if (t != null && t.towerName == nm) c++;
+            gs.towerCountByType[i] = c;
+            gs.upgradeLevelByType[i] = (upm != null) ? upm.GetLevel(nm) : 0;
+        }
+
         return gs;
+    }
+
+    // 경로가 얼마나 '접혀' 있는가 — 각 경로 칸의 foldRadius 안에 있는 다른 경로 칸 수의 평균.
+    // 일직선이면 대략 6, 뱀형으로 접혀 있으면 인접 레인이 더해져 10~14가 나온다.
+    // 같은 경로 길이라도 일직선 맵은 타워 하나가 덮는 구간이 적어 체감 난이도가 훨씬 높다.
+    float ComputeFoldRatio()
+    {
+        var pl = (grid != null) ? grid.pathCoords : null;
+        int n = (pl != null) ? pl.Count : 0;
+        if (n < 2) return 0f;
+
+        float r2 = foldRadius * foldRadius;
+        long total = 0;
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++)
+            {
+                if (i == j) continue;
+                float dx = pl[i].x - pl[j].x, dy = pl[i].y - pl[j].y;
+                if (dx * dx + dy * dy <= r2) total++;
+            }
+        float avg = total / (float)n;
+        return Mathf.Clamp01(avg / Mathf.Max(1f, foldRefNeighbors));
     }
 
     // 경로 타일 중, 어떤 타워든 사거리에 들어오는 타일의 비율

@@ -65,6 +65,8 @@ public class RoundManager : MonoBehaviour
     private float prepRemaining = 0f;
     private int healthAtRoundStart = 0;
     private int leakedThisRound = 0;
+    private int enemiesThisRound = 0;   // 이번 라운드에 스폰된 적 수 (감속 비율 계산의 분모)
+    private int maxAliveThisRound = 0;  // 라운드 중 최대 동시 생존 적 수 (DDA 관측용)
     private float roundStartTime = 0f;
     private float roundSpawnEndTime = 0f; // 이번 라운드 스폰이 끝난 시각 (빠른 클리어 보상용)
 
@@ -181,6 +183,10 @@ public class RoundManager : MonoBehaviour
 
             healthAtRoundStart = (GameManager.Instance != null) ? GameManager.Instance.playerHealth : 0;
             leakedThisRound = 0;
+            enemiesThisRound = 0;
+            maxAliveThisRound = 0;
+            Enemy.slowAppliedThisRound = 0;   // 지원 타워 감속 집계 리셋
+            Enemy.maxProgressThisRound = 0f;  // 적 최대 경로 진행도 리셋
             ResetTowerShots();
             roundStartTime = Time.time;
 
@@ -257,13 +263,25 @@ public class RoundManager : MonoBehaviour
         int healthNow = (GameManager.Instance != null) ? GameManager.Instance.playerHealth : 0;
         int maxH = (GameManager.Instance != null) ? GameManager.Instance.MaxHealth() : 1;
         float lossFrac = Mathf.Max(0f, (maxH > 0) ? (float)(healthAtRoundStart - healthNow) / maxH : 0f);
+        float linger = Mathf.Max(0f, Time.time - roundSpawnEndTime); // 스폰 완료 후 소탕까지 걸린 시간
+
+        // DDA가 다음 라운드 결정 때 볼 관측을 먼저 채워둔다 (RequestDecision보다 먼저 실행됨)
+        if (collector != null)
+        {
+            collector.lastRoundLinger = linger;
+            collector.lastRoundSlowRatio = (enemiesThisRound > 0)
+                ? Mathf.Clamp01(Enemy.slowAppliedThisRound / (float)enemiesThisRound) : 0f;
+            collector.lastRoundMaxAlive = maxAliveThisRound;
+            collector.lastRoundMaxProgress = Enemy.maxProgressThisRound;
+        }
+
         if (agent != null) agent.GradeRound(lossFrac, false, currentRound, roundsPerStage);
         if (usePlacementAgent && placementAgent != null)
         {
-            float linger = Mathf.Max(0f, Time.time - roundSpawnEndTime); // 스폰 완료 후 소탕까지 걸린 시간
             int towerCount = Object.FindObjectsByType<Tower>(FindObjectsSortMode.None).Length;
             float util = (collector != null) ? collector.lastRoundTowerUtilization : 0f;
-            placementAgent.GradeRoundSurvived(lossFrac, linger, towerCount, util);
+            placementAgent.GradeRoundSurvived(lossFrac, linger, towerCount, util,
+                                              Enemy.slowAppliedThisRound, enemiesThisRound);
         }
     }
 
@@ -419,6 +437,8 @@ public class RoundManager : MonoBehaviour
         enemy.damageToPlayer = Mathf.Max(1, Mathf.RoundToInt(maxH * type.leakDamageFraction));
 
         aliveEnemies++;
+        enemiesThisRound++;
+        if (aliveEnemies > maxAliveThisRound) maxAliveThisRound = aliveEnemies;
         enemy.onDied = OnEnemyDied;
         enemy.onReachedEnd = OnEnemyLeaked;
     }

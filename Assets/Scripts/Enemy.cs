@@ -19,6 +19,13 @@ public class Enemy : MonoBehaviour
     private float slowTimer = 0f;
     private float slowFactor = 1f;
 
+    // 이번 라운드에 '새로' 감속이 걸린 적의 수 (RoundManager가 라운드 시작 시 0으로 리셋).
+    // 지원 타워의 가치는 DPS·가동률로는 안 잡히는 간접 효과라, 배치 AI 보상에 쓰려고 집계한다.
+    public static int slowAppliedThisRound = 0;
+
+    // 이번 라운드에 적이 도달한 최대 경로 진행도(0~1). 골에 안 샜어도 '얼마나 아슬아슬했나'를 나타낸다.
+    public static float maxProgressThisRound = 0f;
+
     // 외부(스포너/게임매니저)에서 결과를 받기 위한 콜백
     public System.Action<Enemy> onReachedEnd; // 골 도달
     public System.Action<Enemy> onDied;        // 사망
@@ -56,6 +63,8 @@ public class Enemy : MonoBehaviour
         if (Vector3.Distance(transform.position, targetPos) <= ReachThreshold)
         {
             targetIndex++;
+            float prog = targetIndex / (float)path.Count;
+            if (prog > maxProgressThisRound) maxProgressThisRound = prog;
             if (targetIndex >= path.Count)
                 ReachEnd();
         }
@@ -76,6 +85,10 @@ public class Enemy : MonoBehaviour
     // 사거리에 계속 있으면 재적용되어 유지되고, 사거리를 벗어나면 duration 뒤 회복.
     public void ApplySlow(float factor, float duration)
     {
+        // 이미 감속 중이면 갱신일 뿐이고, 안 걸려 있던 적에게 새로 건 경우만 집계한다.
+        // (지원 타워가 3초마다 재적용하는 걸 중복으로 세면 값이 의미를 잃는다)
+        if (slowTimer <= 0f) slowAppliedThisRound++;
+
         factor = Mathf.Clamp01(factor);
         slowFactor = factor;
         slowTimer = duration;

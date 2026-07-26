@@ -19,7 +19,7 @@ using Unity.MLAgents.Sensors;
 //
 // 인스펙터(Behavior Parameters) 설정:
 //   - Behavior Name = Placement
-//   - Vector Observation > Space Size = GRID_W*GRID_H*7 + 12  (기본 20*16*7+12 = 2252)
+//   - Vector Observation > Space Size = GRID_W*GRID_H*7 + 17  (기본 20*16*7+17 = 2257)
 //   - Actions > Discrete Branches = 3, 크기 = [1+2*타워종류수, GRID_W, GRID_H] = 기본 [11, 20, 16]
 //   - Behavior Type = Default(학습) / Inference Only(고정 상대로 쓸 때)
 //   - DecisionRequester는 붙이지 말 것 (RequestDecision을 코드에서 직접 호출)
@@ -30,7 +30,9 @@ public class PlacementAgent : Agent
     public int gridH = 16;
     // 채널: 설치가능-빈칸 / 경로 / 타워있음 / 경로진행도 / 경로근접도 / 경로밀집도 / 적밀도
     private const int CHANNELS = 7;
-    private const int SCALARS = 12;
+    // 12 → 17 (v5): 종류별 '업그레이드 레벨' 5개 추가.
+    // 자기 레벨을 못 보면 업그레이드 여부를 판단할 수 없어, 그 행동이 통째로 죽어 있었다.
+    private const int SCALARS = 17;
     private const float PROX_REF = 5f; // 경로 근접도 정규화 기준(타일). 이 거리 이상이면 0
 
     [Header("경로 밀집도 관측 (여러 경로 구간을 한 번에 덮는 자리를 알아보게)")]
@@ -80,9 +82,20 @@ public class PlacementAgent : Agent
     public float coverageRefWeight = 3f;       // 새로 덮은 가중치 합이 이만큼이면 배치 보상 1배
     public float coverageMaxMul = 2f;          // 배치 보상 배율 상한 (여러 경로가 겹치는 목 좋은 자리 = 최대 2배)
 
-    [Header("한 종류 과다 배치 억제 (비용과 무관 — 종류 다양성 유도)")]
-    public int sameTypeSoftCap = 3;                // 이 개수까진 벌 없음
-    public float overConcentrationPenalty = 0.03f; // soft cap 초과분 1개당 누적 벌
+    [Header("업그레이드 보상")]
+    public float upgradeValueWeight = 0.06f; // 업그레이드 성공 시 즉시 보상 (건설 보상과 같은 눈금)
+    public float upgradeRefCount = 3f;       // 그 종류 타워가 이만큼 있으면 1배 (설계상 3개부터 업글이 이득)
+    public float upgradeMaxMul = 2f;         // 배율 상한
+
+    [Header("지원 타워: 감속 가치 (DPS·가동률로는 안 잡히는 간접 효과)")]
+    public float slowValueWeight = 0.12f;    // 이번 라운드에 감속을 건 적 비율 × 이 값
+
+    [Header("한 종류 과다 배치 억제")]
+    // 0으로 끔 (2026-07-26). 인위적 넛지인 데다, 업그레이드가 이득이 되는 지점이 정확히
+    // '같은 종류 3개 이상'이라 sameTypeSoftCap(3) 벌과 정면충돌했다.
+    // 진짜 종류 다양성은 DDA가 반례 적을 보내며 만들게 둔다.
+    public int sameTypeSoftCap = 3;             // 이 개수까진 벌 없음
+    public float overConcentrationPenalty = 0f; // soft cap 초과분 1개당 누적 벌 (0=끔)
 
     [Header("보상 - 속도/타워활동/스테이지가중")]
     public float speedWeight = 0.15f;         // 라운드를 빨리 끝낼수록 + (스폰 완료 후 잔존 시간 기준)
@@ -161,6 +174,16 @@ public class PlacementAgent : Agent
                 c = CountTowersOfType(TypeName(i)) / 15f;
             sensor.AddObservation(Mathf.Clamp01(c));
         }
+        // 종류별 업그레이드 레벨 (0~maxLevel 정규화) — 13~17
+        var upm = TowerUpgradeManager.Instance;
+        int maxLv = (upm != null) ? Mathf.Max(1, upm.maxLevel) : 5;
+        for (int i = 0; i < 5; i++)
+        {
+            float lv = 0f;
+            if (upm != null && towerPrefabs != null && i < towerPrefabs.Length)
+                lv = upm.GetLevel(TypeName(i)) / (float)maxLv;
+            sensor.AddObservation(Mathf.Clamp01(lv));
+        }
     }
 
     // ── 유효하지 않은 행동 마스킹 ──
@@ -232,7 +255,15 @@ public class PlacementAgent : Agent
         {
             string nm = TypeName(what - 1 - T);
             var mgr = TowerUpgradeManager.Instance;
-            if (mgr != null) mgr.UpgradeType(nm);   // 실패해도 조용히 무시
+            if (mgr != null && mgr.UpgradeType(nm))
+            {
+                // v5: 업그레이드에도 즉시 보상. 예전엔 건설만 보상을 받고 업그레이드는 0이라,
+                // 같은 골드를 써도 건설이 항상 유리해서 업그레이드 행동이 통째로 죽어 있었다.
+                // 그 종류 타워가 많을수록 실제 이득이 크므로 보유 수에 비례시킨다.
+                int cnt = CountTowersOfType(nm);
+                float mul = Mathf.Min(upgradeMaxMul, cnt / Mathf.Max(1f, upgradeRefCount));
+                AddReward(upgradeValueWeight * mul);
+            }
         }
     }
 
@@ -319,7 +350,8 @@ public class PlacementAgent : Agent
 
     // ── 보상 (RoundManager가 호출) ──
     // lingerTime = 스폰 완료 후 소탕까지 걸린 시간(작을수록 빨리 끝냄). towerCount/utilization = 이번 라운드 타워 수·평균 가동률.
-    public void GradeRoundSurvived(float lossFraction, float lingerTime, int towerCount, float utilization)
+    public void GradeRoundSurvived(float lossFraction, float lingerTime, int towerCount, float utilization,
+                                   int slowApplied = 0, int enemiesThisRound = 0)
     {
         int stage = GameManager.stage;
         float stageNorm = Mathf.Clamp01((stage - 1) / 9f);
@@ -335,6 +367,12 @@ public class PlacementAgent : Agent
         // (3) 많은 타워가 실제로 일할수록 + (타워수 × 가동률) → '적은 타워 + 잦은 업글' 습관 교정
         float active = towerCount * Mathf.Clamp01(utilization);
         r += towerActivityWeight * Mathf.Clamp01(active / Mathf.Max(1f, activeRefCount));
+
+        // (3-b) 감속: 이번 라운드에 실제로 감속을 걸어본 적의 비율.
+        //       지원 타워는 DPS 0.33이라 위 항목들로는 가치가 전혀 안 잡혀서, 배치 AI에게
+        //       '돈만 쓰고 보상은 없는 선택지'였다. 이 항목이 있어야 학습 가능한 카드가 된다.
+        if (enemiesThisRound > 0)
+            r += slowValueWeight * Mathf.Clamp01(slowApplied / (float)enemiesThisRound);
 
         // (4) 하한 보장 — 라운드를 넘겼다는 사실 자체는 항상 +.
         //     이게 없으면 후반(DDA 목표손실 14%) 라운드가 전부 마이너스가 되어

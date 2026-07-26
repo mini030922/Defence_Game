@@ -1,5 +1,5 @@
 # DDA (difficulty adjustment) training config - PPO
-# Observations = 14, Continuous actions = 5. Behavior Name must be: Difficulty
+# Observations = 29, Continuous actions = 5. Behavior Name must be: Difficulty
 behaviors:
   Difficulty:
     trainer_type: ppo
@@ -22,6 +22,6 @@ behaviors:
         strength: 1.0
     keep_checkpoints: 5
     checkpoint_interval: 100000
-    max_steps: 500000
+    max_steps: 1000000
     time_horizon: 128
     summary_freq: 1000

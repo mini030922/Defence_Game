@@ -4,12 +4,12 @@ using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 
 // 난이도 조절 강화학습 에이전트 (설계상 '역할 C: DDA').
-// - 관찰: 게임 상태 11개 + 라운드 진행도 + 현재 강도 + 현재 체력배율 = 14개
+// - 관찰: 기존 14개 + 여유시간·종류별타워5·감속비율·업그레이드레벨5·경로접힘·최대동시적·최대진행도 = 29개
 // - 행동: 강도 상승폭 / 종류별 가중치 3 / 체력배율 상승폭 (연속값 5개)
 // - 보상: 플레이어가 '아슬아슬하게' 클리어할수록 +, 너무 쉽거나 붕괴하면 -
 //
 // 필요 컴포넌트(인스펙터): Behavior Parameters
-//   - Vector Observation > Space Size = 14
+//   - Vector Observation > Space Size = 29
 //   - Actions > Continuous Actions = 5
 //   - Behavior Type = Default(학습) / Inference Only(플레이·스파링) / Heuristic Only(검증)
 public class DifficultyAgent : Agent
@@ -27,6 +27,7 @@ public class DifficultyAgent : Agent
     // 0이면 손실 0 = 0점 / 1누수 = +0.9점이 되어, DDA가 누수를 억지로 짜내려고
     // 난이도를 상한까지 폭주시킨다(강도는 단조 증가라 되돌릴 수도 없다). 0.05면 손실 0도 약 +0.47점.
     public float lossTolerance = 0.05f;
+    public float lingerRefForObs = 8f;      // '여유 시간' 관측 정규화 기준(초). 이 시간 이상 걸리면 1.0
 
     [Header("보상: 초반 보호 (1~2스테이지 1~3라운드는 체력 손실 = 큰 벌)")]
     public int earlyProtectStage = 2;         // 이 스테이지 이하에서
@@ -119,6 +120,38 @@ public class DifficultyAgent : Agent
         // (상한이 스테이지마다 다르므로 '지금 스테이지의 상한 대비 어디까지 올렸나'로 정규화한다)
         sensor.AddObservation(Mathf.InverseLerp(1f, CurMaxIntensity, intensity));
         sensor.AddObservation(Mathf.InverseLerp(1f, CurMaxHealthMultiplier, healthMultiplier));
+
+        // ── 관측 보강 15개 (2026-07-26) — 14 → 29 ──────────────────────────
+        // (15) 직전 라운드 '여유': 스폰 완료 후 소탕까지 걸린 시간.
+        //      체력 손실은 5% 단위라 해상도가 낮고 '손실 0'인 두 판을 구분 못 한다.
+        //      압살한 판과 골 앞에서 간신히 잡은 판이 지금까지 DDA 눈에 똑같았다. '아슬아슬'의 직접 측정치.
+        sensor.AddObservation(Mathf.Clamp01(s.lastRoundLinger / lingerRefForObs));
+
+        // (16~20) 종류별 타워 수 — 플레이어 '구성'을 알아야 반례 적(탱커/물량)을 고를 수 있다.
+        //         지금까지는 총 타워 수와 총 DPS만 봐서, 종류별 가중치 행동 3개가 사실상 눈감고 쏘는 셈이었다.
+        for (int i = 0; i < 5; i++)
+        {
+            int c = (s.towerCountByType != null && i < s.towerCountByType.Length) ? s.towerCountByType[i] : 0;
+            sensor.AddObservation(Mathf.Clamp01(c / 10f));
+        }
+
+        // (21) 감속 비율 — 지원 타워의 간접 기여. 적이 사거리에 머무는 시간을 직접 바꾸는 변수.
+        sensor.AddObservation(Mathf.Clamp01(s.lastRoundSlowRatio));
+
+        // (22~26) 종류별 업그레이드 레벨 — 같은 DPS라도 '적은 수+고레벨'과 '많은 수+0레벨'은 다른 상대다.
+        for (int i = 0; i < 5; i++)
+        {
+            int lv = (s.upgradeLevelByType != null && i < s.upgradeLevelByType.Length) ? s.upgradeLevelByType[i] : 0;
+            sensor.AddObservation(Mathf.Clamp01(lv / 5f));
+        }
+
+        // (27) 경로 접힘 정도 — 같은 40칸이어도 일직선 맵과 뱀형 맵은 체감 난이도가 완전히 다르다.
+        sensor.AddObservation(Mathf.Clamp01(s.pathFoldRatio));
+
+        // (28~29) 직전 라운드 최대 동시 생존 적 수 / 적이 도달한 최대 경로 진행도.
+        //         안 샜어도 골 앞까지 갔는지 = 얼마나 아슬아슬했는지.
+        sensor.AddObservation(Mathf.Clamp01(s.lastRoundMaxAlive / 30f));
+        sensor.AddObservation(Mathf.Clamp01(s.lastRoundMaxProgress));
     }
 
     // 에이전트의 행동을 받아 다음 라운드 난이도 배율로 변환
