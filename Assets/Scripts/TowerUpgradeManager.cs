@@ -101,4 +101,15 @@ public class TowerUpgradeManager : MonoBehaviour
 
     // 스테이지/에피소드 리셋 시 모든 종류 레벨 0으로
     public void ResetLevels() => levelByType.Clear();
+
+    // 골드 지불 없이 레벨을 직접 지정한다 (학습용 시드 전용).
+    // 왜 필요한가 (2026-07-29): 학습은 '에피소드 = 랜덤 스테이지 1개'라서,
+    //   업그레이드를 스테이지 간에 유지시켜도 배치 AI는 그 가치를 관측할 기회가 없다.
+    //   그래서 에피소드 시작 시 "이 스테이지까지 왔다면 이 정도는 강화돼 있었을 것"을 미리 심어준다.
+    //   씬에 타워가 없는 시점에도 호출되므로 비용 계산(BaseTowerCost)을 타지 않는다.
+    public void SetLevel(string type, int level)
+    {
+        if (string.IsNullOrEmpty(type)) return;
+        levelByType[type] = Mathf.Clamp(level, 0, maxLevel);
+    }
 }

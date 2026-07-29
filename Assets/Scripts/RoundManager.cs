@@ -41,6 +41,52 @@ public class RoundManager : MonoBehaviour
     public float enemyHeight = 0.6f;
     public bool randomizePathEachEpisode = true; // 에피소드마다 경로를 무작위로 (학습 일반화)
 
+    [Header("스테이지별 기본 스케일 (DDA가 아무것도 안 했을 때의 난이도)")]
+    // 0.2 / 0.3 → 0.12 / 0.12 (2026-07-28).
+    // 측정 결과 강도 1.0(하한)에서도 실제 손실이 보상 목표를 모든 스테이지에서 초과하고 있었다.
+    //   전체 평균 실제 0.118 vs 목표 0.078, S10은 0.408 vs 0.084.
+    // 즉 DDA는 소극적인 게 아니라 **내릴 수가 없어서 하한에 붙어 있었다.**
+    // 원인: 스테이지가 오를 때 위협은 ×10.3(적 수 2.8 × 체력 3.7)인데
+    //       플레이어 구매력은 ×1.6(수입 3.35 ÷ 타워가격 2.08)에 그쳐 6.4배 격차가 났다.
+    // 원칙: **기본 스케일은 DDA의 시작점이므로 가장 쉬운 목표(easyTargetLoss)보다 아래여야 한다.**
+    //       그래야 DDA에게 올릴 여지가 생긴다.
+    public float stageCountGrowth = 0.12f;  // 스테이지 1당 적 수 배율 증가
+    public float stageHealthGrowth = 0.12f; // 스테이지 1당 적 체력 배율 증가
+
+    [Header("라운드별 기본 위협 (스테이지 1의 절대 난이도)")]
+    // (6 + 3i) / (14 + 4i) → (4 + 2i) / (10 + 3i) (2026-07-28).
+    // S1은 스테이지 배율이 1.0이라 위 stageGrowth 완화가 전혀 적용되지 않는다.
+    // 그런데 S1 실측 손실이 라운드당 0.070(10라운드 누적 70%)으로, GDD의 "1~3스테이지는
+    // 체력 70% 이상 남기고 클리어"와 정반대였다. 위협 총량을 약 절반으로 낮춘다.
+    //
+    // 2026-07-29 — 라운드 내 경사 완화: 2.0 / 3.0 → 1.4 / 2.0
+    // dda_v6 실측에서 DDA가 전 스테이지 강도 1.00(하한)에 붙어 있었다. 소극적이어서가 아니라,
+    // 스테이지 안의 라운드 경사가 너무 가팔라 **올릴 수가 없었기 때문**이다.
+    //   S8: R1 손실 0.047 → R10 0.244 (사망 715/4768)
+    //   S9: R1 손실 0.046 → R10 0.264 (사망 764/4592)
+    // 강도는 단조 증가라 한 번 올리면 못 내린다. 앞 라운드에서 목표 손실(0.05)을 맞추려고 올리면
+    // R10에서 확정 사망한다 → '바닥에 붙어 있기'가 최적 정책이 되어버렸다.
+    // 기본 경사를 낮추는 것은 게임을 쉽게 만들려는 게 아니라,
+    // **'라운드가 갈수록 어려워지는 곡선'을 만들 권한을 DDA에게 넘기는 것**이다.
+    public float roundBudgetBase = 4f;      // 1라운드 위협 예산
+    public float roundBudgetGrowth = 1.4f;  // 라운드당 예산 증가
+    public float roundHealthBase = 10f;     // 1라운드 적 기본 체력
+    public float roundHealthGrowth = 2f;    // 라운드당 체력 증가
+
+    [Header("업그레이드 유지 (2026-07-29 신설)")]
+    // 문제: 강화 87,554회 전수 집계에서 폭탄 83.5% / 일반 16.4% / 속사 0.1% / 지원 0.05% / 미사일 0%,
+    //       도달 레벨은 Lv1 63% · Lv2 31% · Lv3 이상 5.7%뿐이었다.
+    //       스테이지마다 레벨이 리셋되니 '고레벨까지 굴릴 시간' 자체가 없어서
+    //       회수가 빠른 싼 타워만 한 번 찍고 끝나는 죽은 시스템이었다.
+    // 더 큰 문제: 적 총 체력은 S1→S10에 4.33배 커지는데 배치 AI 총 DPS는 1.87배에 그쳐
+    //       플레이어에게 성장 레버가 아예 없었다. S10 절벽(클리어율 0.3%)의 직접 원인.
+    public bool keepUpgradesAcrossStages = true; // 플레이용: 스테이지가 넘어가도 종류별 강화 레벨 유지
+    // 학습용 시드. 학습은 '에피소드 = 랜덤 스테이지 1개'라 유지만 켜면 배치 AI가 그 가치를 영영 못 배운다.
+    // 에피소드 시작 시 스테이지에 비례한 레벨을 '무작위 종류'에 뿌려주면,
+    // 이미 관측 중인 upgradeLevelByType(관측 13~17번)을 읽고
+    // "이미 강화된 종류를 짓는다"는 전략까지 부수적으로 학습한다.
+    public float upgradeSeedPerStage = 0.7f;     // 스테이지 1당 시드 레벨 (S10 → 약 6레벨이 5종류에 분산)
+
     [Header("스테이지")]
     public bool randomizeStageForTraining = true; // 학습용: 에피소드마다 스테이지 무작위(전 구간 학습)
     public int maxStageForTraining = 10;
@@ -115,9 +161,20 @@ public class RoundManager : MonoBehaviour
         if (randomizePathEachEpisode && grid != null)
             grid.RandomizePath();
 
-        // 종류별 업그레이드 레벨도 초기화 (새 스테이지는 강화 0부터)
+        // 종류별 업그레이드 레벨 처리.
+        //  · 플레이: keepUpgradesAcrossStages면 S2부터는 유지 (= 플레이어의 유일한 성장 레버)
+        //  · 학습:   매 에피소드 초기화 후, 스테이지에 비례한 레벨을 시드로 심는다
         if (TowerUpgradeManager.Instance != null)
-            TowerUpgradeManager.Instance.ResetLevels();
+        {
+            bool keep = keepUpgradesAcrossStages
+                        && !randomizeStageForTraining
+                        && GameManager.stage > 1;
+            if (!keep)
+            {
+                TowerUpgradeManager.Instance.ResetLevels();
+                SeedUpgradeLevels();
+            }
+        }
 
         currentRound = 0;
         aliveEnemies = 0;
@@ -129,6 +186,68 @@ public class RoundManager : MonoBehaviour
             bot.enabled = !usePlacementAgent;
             if (!usePlacementAgent) bot.OnEpisodeReset();
         }
+    }
+
+    // ── 학습용 강화 시드 ────────────────────────────────────────────────
+    // 스테이지 S로 시작하는 에피소드에, "S까지 오는 동안 쌓았을 법한" 강화 레벨을 미리 준다.
+    // 종류를 무작위로 고르는 것이 핵심: 매 에피소드 다른 종류가 강화된 상태로 시작하므로
+    // 배치 AI는 '어느 종류가 이미 강한지'를 관측해서 그 종류를 짓는 법을 배워야 한다.
+    // (고정 배분이면 그냥 특정 타워를 외워버려서 관측을 읽을 이유가 없어진다)
+    void SeedUpgradeLevels()
+    {
+        var upm = TowerUpgradeManager.Instance;
+        if (upm == null || upgradeSeedPerStage <= 0f) return;
+
+        int total = Mathf.RoundToInt(upgradeSeedPerStage * (GameManager.stage - 1));
+        if (total <= 0) return;
+
+        List<string> names = TowerTypeNames();
+        if (names.Count == 0) return;
+
+        for (int k = 0; k < total; k++)
+        {
+            // 무작위 종류에 1레벨. 이미 최대면 다른 종류를 찾아본다(전부 최대면 중단).
+            bool placed = false;
+            for (int attempt = 0; attempt < names.Count * 2; attempt++)
+            {
+                string nm = names[Random.Range(0, names.Count)];
+                if (string.IsNullOrEmpty(nm) || upm.IsMaxed(nm)) continue;
+                upm.SetLevel(nm, upm.GetLevel(nm) + 1);
+                placed = true;
+                break;
+            }
+            if (!placed) break;
+        }
+    }
+
+    private List<string> cachedTypeNames;
+
+    // 타워 종류 이름 목록 — 배치 AI / BuildManager와 같은 순서를 쓴다
+    List<string> TowerTypeNames()
+    {
+        if (cachedTypeNames != null && cachedTypeNames.Count > 0) return cachedTypeNames;
+        // 빈 결과는 캐시하지 않는다 — Start()에서 참조가 아직 안 잡힌 시점에 호출되면
+        // 영구히 빈 목록이 굳어 시드가 조용히 죽는다.
+        cachedTypeNames = new List<string>();
+
+        GameObject[] prefabs = null;
+        if (placementAgent != null && placementAgent.towerPrefabs != null && placementAgent.towerPrefabs.Length > 0)
+            prefabs = placementAgent.towerPrefabs;
+        else
+        {
+            BuildManager bm = Object.FindFirstObjectByType<BuildManager>();
+            if (bm != null) prefabs = bm.towerPrefabs;
+        }
+        if (prefabs == null) return cachedTypeNames;
+
+        foreach (GameObject p in prefabs)
+        {
+            if (p == null) continue;
+            Tower t = p.GetComponent<Tower>();
+            string nm = (t != null && !string.IsNullOrEmpty(t.towerName)) ? t.towerName : p.name;
+            if (!string.IsNullOrEmpty(nm)) cachedTypeNames.Add(nm);
+        }
+        return cachedTypeNames;
     }
 
     IEnumerator RunEpisode()
@@ -224,6 +343,7 @@ public class RoundManager : MonoBehaviour
         // ── 스테이지 클리어 → 에피소드 종료 ──
         state = State.StageClear;
         Debug.Log("스테이지 클리어! 🎉");
+        if (collector != null) collector.LogComposition(true, roundsPerStage, roundsPerStage);
         if (advanceStageOnClear)
             GameManager.stage = Mathf.Max(1, GameManager.stage + 1); // 플레이용 진행
         yield return new WaitForSeconds(1.5f); // 결과 잠깐 표시
@@ -290,6 +410,7 @@ public class RoundManager : MonoBehaviour
     {
         state = State.StageFail;
         Debug.Log("스테이지 실패...");
+        if (collector != null) collector.LogComposition(false, currentRound + 1, roundsPerStage);
         if (usePlacementAgent && placementAgent != null)
         {
             placementAgent.GradeDied();
@@ -316,14 +437,14 @@ public class RoundManager : MonoBehaviour
     RoundData BuildRound(int i)
     {
         int stage = GameManager.stage;
-        float countScale = 1f + (stage - 1) * 0.2f;
-        float healthScale = 1f + (stage - 1) * 0.3f;
+        float countScale = 1f + (stage - 1) * stageCountGrowth;
+        float healthScale = 1f + (stage - 1) * stageHealthGrowth;
 
         float intensity = (agent != null) ? agent.intensity : 1f;       // 총 위협 강도(단조 증가)
         float healthMult = (agent != null) ? agent.healthMultiplier : 1f; // 체력 배율(단조 증가)
 
         // 이번 라운드 총 위협 예산 (라운드·스테이지·에이전트 강도)
-        float totalBudget = (6f + i * 3f) * countScale * intensity;
+        float totalBudget = (roundBudgetBase + i * roundBudgetGrowth) * countScale * intensity;
 
         // 에이전트의 종류별 가중치 (없으면 일반에 몰기)
         int n = enemyTypes.Count;
@@ -349,7 +470,7 @@ public class RoundManager : MonoBehaviour
         return new RoundData
         {
             spawnInterval = Mathf.Max(0.25f, 0.8f - i * 0.05f),
-            baseHealth = (14f + i * 4f) * healthScale * healthMult,
+            baseHealth = (roundHealthBase + i * roundHealthGrowth) * healthScale * healthMult,
             baseSpeed = 2f + (stage - 1) * 0.1f,
             typeCounts = counts
         };
@@ -370,7 +491,11 @@ public class RoundManager : MonoBehaviour
         enemyTypes.Add(new EnemyType {
             typeName = "탱커", healthMultiplier = 3f, speedMultiplier = 0.6f,
             scale = 0.8f, color = new Color(0.55f, 0.35f, 0.7f), cost = 2.5f, leakDamageFraction = 0.12f,
-            roundHealthGrowth = 0.30f   // 라운드마다 +30%씩 누적 → 후반 라운드 탱커는 매우 단단
+            // 0.30 → 0.18 (2026-07-29). 라운드 내 경사 완화의 일부.
+            // 탱커만 라운드마다 체력이 누적 성장해서, R10 탱커는 R1의 3.7배였다.
+            // 스테이지 후반 라운드의 손실 급증(S9 R9 0.134 → R10 0.264)의 주범이라
+            // DDA가 초·중반 라운드에서 강도를 올릴 여지를 전부 잡아먹고 있었다.
+            roundHealthGrowth = 0.18f   // 라운드마다 +18%씩 누적 → R10 탱커는 R1의 약 2.6배
         });
     }
 
@@ -471,6 +596,7 @@ public class RoundManager : MonoBehaviour
             float duration = Mathf.Max(0.1f, Time.time - since);
             float maxShots = (t.shootingSpeed > 0f) ? duration / t.shootingSpeed : 0f;
             float util = (maxShots > 0f) ? Mathf.Clamp01(t.shotsThisRound / maxShots) : 0f;
+            t.lastRoundUtil = util;   // 배치 AI 관측용 (타워별 가동률 채널)
             sum += util;
         }
         collector.lastRoundTowerUtilization = sum / towers.Length;

@@ -5,7 +5,7 @@ using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 
 // 최적 배치 AI (설계상 '역할 B: 플레이어 도우미 / 최적 타워 배치').
-// - 관찰: 전체 그리드(설치가능/경로/타워위치/경로진행도/경로근접도 5채널) + 상태 스칼라
+// - 관찰: 맵 그리드 8채널은 PlacementGridSensor(이미지 센서, CNN)가 별도로, 여기서는 스칼라 29개만
 // - 행동(멀티 디스크리트 3브랜치):
 //     branch0: 무엇을 할지  [0=아무것도, 1..T=타워 종류 건설, T+1..2T=종류 업그레이드]
 //     branch1: 타일 X (0..GRID_W-1)
@@ -19,7 +19,9 @@ using Unity.MLAgents.Sensors;
 //
 // 인스펙터(Behavior Parameters) 설정:
 //   - Behavior Name = Placement
-//   - Vector Observation > Space Size = GRID_W*GRID_H*7 + 17  (기본 20*16*7+17 = 2257)
+//   - Vector Observation > Space Size = **29** (스칼라만. 그리드는 PlacementGridSensor가 따로 냄)
+//   - 같은 GameObject에 PlacementGridSensorComponent를 붙일 것
+//   - placement.yaml: vis_encode_type: match3
 //   - Actions > Discrete Branches = 3, 크기 = [1+2*타워종류수, GRID_W, GRID_H] = 기본 [11, 20, 16]
 //   - Behavior Type = Default(학습) / Inference Only(고정 상대로 쓸 때)
 //   - DecisionRequester는 붙이지 말 것 (RequestDecision을 코드에서 직접 호출)
@@ -28,25 +30,12 @@ public class PlacementAgent : Agent
     [Header("그리드 최대 크기 (실제 그리드 ≤ 이 값이어야 함)")]
     public int gridW = 20;
     public int gridH = 16;
-    // 채널: 설치가능-빈칸 / 경로 / 타워있음 / 경로진행도 / 경로근접도 / 경로밀집도 / 적밀도
-    private const int CHANNELS = 7;
-    // 12 → 17 (v5): 종류별 '업그레이드 레벨' 5개 추가.
-    // 자기 레벨을 못 보면 업그레이드 여부를 판단할 수 없어, 그 행동이 통째로 죽어 있었다.
-    private const int SCALARS = 17;
-    private const float PROX_REF = 5f; // 경로 근접도 정규화 기준(타일). 이 거리 이상이면 0
-
-    [Header("경로 밀집도 관측 (여러 경로 구간을 한 번에 덮는 자리를 알아보게)")]
-    // '경로에 붙어 있으면 좋다'(근접도)만으로는 뱀형 경로가 접히는 목 좋은 자리를 구분 못 한다.
-    // 이 채널은 각 칸에서 densityRefRange 안에 경로 칸이 몇 개나 들어오는지를 알려준다.
-    public float densityRefRange = 3f;   // 밀집도 판정 반경(칸) — 일반 타워 사거리 기준
-    public float densityRefTiles = 10f;  // 이만큼 덮이면 1.0
-    public float enemyDensRefCount = 3f; // 한 칸에 적이 이만큼 겹치면 1.0
-
-    // 그리드 맵들 (매 관측마다 재계산, 배열 재사용으로 GC 최소화)
-    private float[,] pathProg;
-    private float[,] pathProx;
-    private float[,] pathDens;
-    private float[,] enemyDens;
+    // v7: 맵 그리드 8채널은 이제 **PlacementGridSensor**(커스텀 이미지 센서)가 따로 내보낸다.
+    //     여기(CollectObservations)에는 스칼라 29개만 남는다. Space Size = 29.
+    // 12 → 17 (v5): 종류별 '업그레이드 레벨' 5개.  17 → 29 (v6): 직전 라운드 누수·손실 2개 +
+    // 종류별 '현재 건설가' 5개 + 종류별 '업그레이드 비용' 5개.
+    // 가격을 못 보면 "지금 이게 비싸다"는 판단을 할 근거가 없다(마스킹은 살 수 있냐만 막아줌).
+    private const int SCALARS = 29;
 
     [Header("연결 (비우면 자동으로 찾음)")]
     public GridManager grid;
@@ -79,7 +68,11 @@ public class PlacementAgent : Agent
     //     가까울수록 적이 사거리 안에 머무는 시간이 길고 투사체가 빗나갈 확률도 낮으므로 실제로 더 가치 있다.
     //     칸 가중치 = (1 − 거리/유효사거리) ^ coverageFalloffPower   (거리 0 → 1.0, 유효사거리 끝 → 0)
     public float coverageFalloffPower = 1f;    // 1=선형. 올릴수록 '바짝 붙이기'를 더 강하게 선호
-    public float coverageRefWeight = 3f;       // 새로 덮은 가중치 합이 이만큼이면 배치 보상 1배
+    public float coverageRefWeight = 3f;       // 새로 덮은 가중치 합이 이만큼이면 배치 보상 1배 (사거리 3 기준)
+    // v6: 기준을 그 타워의 사거리에 비례시킨다. 안 그러면 사거리가 길수록 무조건 유리해서
+    //     직선 경로 기준 폭탄(R2) 0.022 vs 미사일(R7.5) 0.120으로 5.5배 격차가 났다.
+    //     비례시키면 기준이 '얼마나 넓게 덮었나'가 아니라 '자기 사거리를 얼마나 잘 활용했나'가 되어 1.7배로 줄어든다.
+    public float coverageRangeRef = 3f;        // 이 사거리를 가진 타워가 coverageRefWeight를 그대로 씀 (일반 타워 기준)
     public float coverageMaxMul = 2f;          // 배치 보상 배율 상한 (여러 경로가 겹치는 목 좋은 자리 = 최대 2배)
 
     [Header("업그레이드 보상")]
@@ -102,7 +95,10 @@ public class PlacementAgent : Agent
     public float lingerRef = 8f;              // 스폰 완료 후 이 시간(초) 안에 필드가 비면 속도 만점
     public float towerActivityWeight = 0.12f; // '많은 타워가 실제로 일할수록' + (타워수 × 가동률)
     public float activeRefCount = 8f;         // 활동 타워 정규화 기준 (이만큼이면 만점)
-    public float stageRewardWeight = 0.5f;    // 고스테이지 생존·클리어 보상 가중 (0=없음, 1=최대 2배)
+    // 0.5 → 1.5 (2026-07-26): 10스테이지 보상이 1스테이지의 1.5배뿐이라, 실제 난이도 상승폭
+    // (적 수 ×2.8, 체력 ×3.7, DDA 상한도 더 높음)에 비해 보상 상승폭이 턱없이 작았다.
+    // 그 결과 '쉬운 스테이지만 확실히 먹는' 정책이 기대값상 최적이 되어 S4 이상 클리어율이 2% 수준이었다.
+    public float stageRewardWeight = 1.5f;    // 고스테이지 생존·클리어 보상 가중 (10스테이지에서 2.5배)
 
     [HideInInspector] public bool lastActionWasNoOp = false;
 
@@ -113,11 +109,7 @@ public class PlacementAgent : Agent
         if (grid == null) grid = Object.FindFirstObjectByType<GridManager>();
         if (collector == null) collector = Object.FindFirstObjectByType<GameStateCollector>();
         if (roundManager == null) roundManager = Object.FindFirstObjectByType<RoundManager>();
-        pathProg = new float[gridW, gridH];
-        pathProx = new float[gridW, gridH];
-        pathDens = new float[gridW, gridH];
-        enemyDens = new float[gridW, gridH];
-        Debug.Log($"[배치AI] 기대 관측 수 = {gridW * gridH * CHANNELS + SCALARS} (Behavior Parameters의 Space Size와 같아야 함)");
+        Debug.Log($"[배치AI] 기대 Space Size = {SCALARS} (그리드는 PlacementGridSensor가 따로 내보냄)");
     }
 
     // DDA가 에피소드를 주도하므로 여기서는 상태만 초기화 (StartEpisode 호출하지 않음)
@@ -126,34 +118,10 @@ public class PlacementAgent : Agent
         lastActionWasNoOp = false;
     }
 
-    // ── 관찰: 전체 그리드 3채널 + 스칼라 ──
+    // ── 관찰: 스칼라 29개만. 맵 그리드 8채널은 PlacementGridSensor가 이미지로 따로 내보낸다 ──
     public override void CollectObservations(VectorSensor sensor)
     {
-        RebuildPathMaps(); // 이번 판 경로의 진행도/근접도 맵 갱신
-
-        for (int y = 0; y < gridH; y++)
-        {
-            for (int x = 0; x < gridW; x++)
-            {
-                Tile t = (grid != null) ? grid.GetTile(new Vector2Int(x, y)) : null;
-                float buildableEmpty = (t != null && t.CanBuild()) ? 1f : 0f;
-                float isPath = (t != null && t.type == TileType.Path) ? 1f : 0f;
-                float towerHere = (t != null && t.type == TileType.Buildable && t.occupied) ? 1f : 0f;
-                float prog = (t != null) ? pathProg[x, y] : 0f;   // 경로면 입구≈작은값 → 골=1, 비경로=0
-                float prox = (t != null) ? pathProx[x, y] : 0f;   // 경로에 가까울수록 1
-                float dens = (t != null) ? pathDens[x, y] : 0f;   // 반경 안에 경로 칸이 많을수록 1 (목 좋은 자리)
-                float edns = (t != null) ? enemyDens[x, y] : 0f;  // 지금 이 근처에 적이 많을수록 1
-                sensor.AddObservation(buildableEmpty);
-                sensor.AddObservation(isPath);
-                sensor.AddObservation(towerHere);
-                sensor.AddObservation(prog);
-                sensor.AddObservation(prox);
-                sensor.AddObservation(dens);
-                sensor.AddObservation(edns);
-            }
-        }
-
-        // 스칼라 (총 12개)
+        // 스칼라 (총 29개)
         GameState s = (collector != null) ? collector.Collect() : default;
         int gold = (GameManager.Instance != null) ? GameManager.Instance.gold : 0;
         int round = (roundManager != null) ? roundManager.CurrentRound : 0;
@@ -183,6 +151,36 @@ public class PlacementAgent : Agent
             if (upm != null && towerPrefabs != null && i < towerPrefabs.Length)
                 lv = upm.GetLevel(TypeName(i)) / (float)maxLv;
             sensor.AddObservation(Mathf.Clamp01(lv));
+        }
+
+        // 직전 라운드 결과 — 18~19.
+        // 체력비율은 누적값이라 "지난 라운드가 아슬아슬했는지"를 알 수 없다.
+        // 5라운드에 체력 0.6인 상황이 '직전에 왕창 깎인 것'인지 '꾸준히 조금씩'인지 구분이 안 됐다.
+        sensor.AddObservation(Mathf.Clamp01(s.lastRoundLeaked / 20f));
+        sensor.AddObservation(Mathf.Clamp01(s.lastRoundHealthLost / 50f));
+
+        // 종류별 현재 건설가 — 20~24. GetScaledCost는 지을수록 +15%씩 오르는데
+        // 지금까지는 골드만 보이고 '가격'은 안 보여서, 비싸다는 판단 자체를 할 수 없었다.
+        GameManager gm2 = GameManager.Instance;
+        for (int i = 0; i < 5; i++)
+        {
+            float c = 0f;
+            if (gm2 != null && towerPrefabs != null && i < towerPrefabs.Length && towerPrefabs[i] != null)
+                c = gm2.GetScaledCost(PrefabCost(i)) / 500f;
+            sensor.AddObservation(Mathf.Clamp01(c));
+        }
+
+        // 종류별 업그레이드 비용 — 25~29. 업그레이드를 실제로 쓰기 시작했으니 가격 비교가 가능해야 한다.
+        // 최대 레벨이면 1.0(= 가장 비쌈/불가)을 넣는다. 0을 넣으면 '공짜'로 읽혀 의미가 뒤집힌다.
+        for (int i = 0; i < 5; i++)
+        {
+            float c = 1f;
+            if (upm != null && towerPrefabs != null && i < towerPrefabs.Length)
+            {
+                string nm = TypeName(i);
+                if (!string.IsNullOrEmpty(nm) && !upm.IsMaxed(nm)) c = upm.NextCost(nm) / 1000f;
+            }
+            sensor.AddObservation(Mathf.Clamp01(c));
         }
     }
 
@@ -319,7 +317,9 @@ public class PlacementAgent : Agent
         //   지원(costNorm 1.6, DPS 0.33)·미사일(costNorm 3.0) 파밍 경사가 생긴다.
         if (newCovered > 0f)
         {
-            float covMul = Mathf.Min(coverageMaxMul, newCovered / Mathf.Max(0.1f, coverageRefWeight));
+            // 기준 가중치를 그 타워의 사거리에 비례시켜, 사거리가 길다는 이유만으로 유리해지지 않게 한다
+            float refW = coverageRefWeight * (effectiveRange / Mathf.Max(0.1f, coverageRangeRef));
+            float covMul = Mathf.Min(coverageMaxMul, newCovered / Mathf.Max(0.1f, refW));
             AddReward(placementValueWeight * covMul);
         }
 
@@ -506,66 +506,5 @@ public class PlacementAgent : Agent
             sum += Mathf.Pow(Mathf.Clamp01(1f - d / myRange), coverageFalloffPower);
         }
         return sum;
-    }
-
-    // 이번 판 경로 기준으로 진행도/근접도 맵을 다시 계산
-    void RebuildPathMaps()
-    {
-        if (pathProg == null) pathProg = new float[gridW, gridH];
-        if (pathProx == null) pathProx = new float[gridW, gridH];
-        if (pathDens == null) pathDens = new float[gridW, gridH];
-        if (enemyDens == null) enemyDens = new float[gridW, gridH];
-
-        for (int x = 0; x < gridW; x++)
-            for (int y = 0; y < gridH; y++)
-            { pathProg[x, y] = 0f; pathProx[x, y] = 0f; pathDens[x, y] = 0f; enemyDens[x, y] = 0f; }
-
-        RebuildEnemyDensity();
-
-        var pl = (grid != null) ? grid.pathCoords : null;
-        int n = (pl != null) ? pl.Count : 0;
-        if (n == 0) return;
-
-        // 진행도: 경로 순서대로 (i+1)/n → 입구≈작은 양수, 골=1 (비경로는 0)
-        for (int i = 0; i < n; i++)
-        {
-            Vector2Int c = pl[i];
-            if (c.x >= 0 && c.x < gridW && c.y >= 0 && c.y < gridH)
-                pathProg[c.x, c.y] = (i + 1) / (float)n;
-        }
-
-        // 근접도(가장 가까운 경로까지) + 밀집도(반경 안 경로 칸 수)를 한 번에 계산
-        float dr2 = densityRefRange * densityRefRange;
-        for (int x = 0; x < gridW; x++)
-            for (int y = 0; y < gridH; y++)
-            {
-                float best = float.MaxValue;
-                int within = 0;
-                for (int i = 0; i < n; i++)
-                {
-                    float dx = pl[i].x - x, dy = pl[i].y - y;
-                    float sq = dx * dx + dy * dy;
-                    if (sq <= dr2) within++;              // 밀집도: 반경 안 경로 칸 수
-                    float d = Mathf.Sqrt(sq);
-                    if (d < best) best = d;
-                }
-                pathProx[x, y] = Mathf.Clamp01(1f - best / PROX_REF);
-                pathDens[x, y] = Mathf.Clamp01(within / Mathf.Max(1f, densityRefTiles));
-            }
-    }
-
-    // 지금 필드에 있는 적들을 타일 격자로 집계 (전투 중 판단용 관측)
-    void RebuildEnemyDensity()
-    {
-        if (grid == null) return;
-        Enemy[] all = Object.FindObjectsByType<Enemy>(FindObjectsSortMode.None);
-        if (all.Length == 0) return;
-        foreach (Enemy e in all)
-        {
-            if (e == null) continue;
-            Vector2Int c = grid.WorldToGrid(e.transform.position);
-            if (c.x < 0 || c.x >= gridW || c.y < 0 || c.y >= gridH) continue;
-            enemyDens[c.x, c.y] = Mathf.Clamp01(enemyDens[c.x, c.y] + 1f / enemyDensRefCount);
-        }
     }
 }

@@ -32,6 +32,11 @@ public class Tower : MonoBehaviour
     // 이 타워가 실제로 가동을 시작한 시각 (전투 중에 지어진 타워의 가동률을 공정하게 계산하기 위함)
     [System.NonSerialized] public float activeSince;
 
+    // 직전 라운드에 이 타워 '개별'의 가동률 (0~1). RoundManager가 라운드 종료 시 채운다.
+    // 평균 가동률만으로는 '12개가 고르게 70%'와 '3개가 완전히 놀고 9개가 풀가동'을 구분 못 해서,
+    // 배치 AI가 어느 자리가 실패였는지 알 방법이 없었다.
+    [System.NonSerialized] public float lastRoundUtil;
+
     [Header("광역 공격 (targetArea가 true일 때만 사용)")]
     public float splashRadius = 1.5f;
 

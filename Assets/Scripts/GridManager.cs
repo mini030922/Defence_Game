@@ -15,6 +15,14 @@ public class GridManager : MonoBehaviour
     public Color buildableColor = new Color(0.35f, 0.65f, 0.35f);
     public Color pathColor = new Color(0.82f, 0.72f, 0.45f);
 
+    [Header("경로 길이 하한 (2026-07-28 추가)")]
+    // 짧은 경로는 타워가 쏠 시간도, 한 타워가 덮을 구간도 적어 게임이 급격히 어려워진다.
+    // 실측(dda_v5 로그): 경로 20~29칸 맵의 S2 클리어율 26% vs 80~89칸 맵 85%.
+    //                   라운드당 손실도 0.152 vs 0.047로 3.2배 차이.
+    // 즉 난이도 평균이 아니라 **맵 변동성**이 클리어 가능 여부를 지배하고 있었다.
+    public int minPathLength = 45;         // 이 길이 미만이면 경로를 다시 뽑는다
+    public float straightLaneChance = 0f;  // 레인 1줄짜리 단조로운 경로가 나올 확률 (0 = 안 나옴)
+
     [Header("경로 좌표 (비워두면 기본 직선 경로 자동 사용)")]
     public List<Vector2Int> pathCoords = new List<Vector2Int>();
 
@@ -109,7 +117,14 @@ public class GridManager : MonoBehaviour
     // 왕복 횟수(레인 수)를 무작위로 → 가끔 단조(1줄), 가끔 큰 사행.
     List<Vector2Int> GenerateRandomPath()
     {
-        for (int attempt = 0; attempt < 40; attempt++)
+        // 1차: 길이 하한을 만족하는 경로만 채택
+        for (int attempt = 0; attempt < 60; attempt++)
+        {
+            List<Vector2Int> p = TrySerpentine();
+            if (p != null && p.Count >= minPathLength) return p;
+        }
+        // 2차: 그리드가 작아 하한을 못 채우는 경우를 위해 조건을 푼다
+        for (int attempt = 0; attempt < 20; attempt++)
         {
             List<Vector2Int> p = TrySerpentine();
             if (p != null && p.Count >= 2) return p;
@@ -140,7 +155,9 @@ public class GridManager : MonoBehaviour
         int choices = (maxOdd + 1) / 2;                 // 홀수 후보 개수 (1,3,5,...)
         int pick;
         if (choices <= 1) pick = 0;                     // 공간이 작으면 어쩔 수 없이 1줄
-        else if (Random.value < 0.15f) pick = 0;        // 가끔만 단조로운 1줄
+        // 1줄짜리 직선 경로는 약 20칸밖에 안 돼서 S2 클리어율이 26%까지 떨어졌다.
+        // '다양성'을 위해 15% 확률로 뽑고 있었는데, 실제로는 못 깨는 맵을 만들고 있었다. → 기본 0.
+        else if (Random.value < straightLaneChance) pick = 0;
         else pick = Random.Range(1, choices);           // 대부분 여러 번 왕복하는 스네이크
         int laneCap = 1 + 2 * pick;
 

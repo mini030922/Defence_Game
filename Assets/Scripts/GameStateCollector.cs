@@ -203,4 +203,33 @@ public class GameStateCollector : MonoBehaviour
         GameState gs = Collect();
         Debug.Log("[상태] " + gs.ToLogString(roundNumber, totalRounds));
     }
+
+    // 에피소드(스테이지 한 판) 종료 시 딱 한 줄 — 타워 '구성'을 남긴다. (2026-07-29 추가)
+    //
+    // 왜 필요한가: 지금까지 로그에는 타워 '총 개수'와 '총 DPS'만 있어서,
+    //   "빠른 적이 늘면 속사 타워 비율이 오르는가", "지원 타워는 여전히 죽은 카드인가" 같은
+    //   구성 질문에 답을 할 수가 없었다. 강화 분포는 [강화] 로그로 간접 추정했지만
+    //   그건 '올린 횟수'지 '판이 끝났을 때 실제로 보유한 레벨'이 아니다.
+    //   에피소드당 한 줄이라 로그 용량 부담도 거의 없다.
+    public void LogComposition(bool cleared, int reachedRound, int totalRounds)
+    {
+        GameState gs = Collect();
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"[구성] S{gs.stage} 결과={(cleared ? "클리어" : "실패")} R{reachedRound}/{totalRounds} 타워[");
+        for (int i = 0; i < 5; i++)
+        {
+            string nm = TypeName(i);
+            if (string.IsNullOrEmpty(nm)) continue;
+            if (i > 0) sb.Append(' ');
+            sb.Append($"{nm}:{gs.towerCountByType[i]}");
+        }
+        sb.Append("] 강화[");
+        for (int i = 0; i < 5; i++)
+        {
+            if (i > 0) sb.Append('/');
+            sb.Append(gs.upgradeLevelByType[i]);
+        }
+        sb.Append($"] 총DPS {gs.totalTowerDps:0.0} 골드 {gs.gold} 경로칸 {gs.pathLength}");
+        Debug.Log(sb.ToString());
+    }
 }

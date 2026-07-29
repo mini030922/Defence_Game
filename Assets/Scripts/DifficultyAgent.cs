@@ -23,10 +23,21 @@ public class DifficultyAgent : Agent
     public float hardTargetLoss = 0.14f;    // 최후반(가혹, 완벽해야 겨우 생존 → 합계 ~140%)
     public float difficultyCurve = 1.5f;    // 클수록 어려움이 후반에 몰림(9~10스테이지 급가혹)
     public int maxStageForTarget = 10;
-    // 목표 손실 판정의 여유폭. 분모를 (목표 + 이 값)으로 만들어 '손실 0'도 부분 점수를 받게 한다.
-    // 0이면 손실 0 = 0점 / 1누수 = +0.9점이 되어, DDA가 누수를 억지로 짜내려고
-    // 난이도를 상한까지 폭주시킨다(강도는 단조 증가라 되돌릴 수도 없다). 0.05면 손실 0도 약 +0.47점.
-    public float lossTolerance = 0.05f;
+    // 목표 손실 판정의 여유폭 — v5(2026-07-28)부터 **비대칭**.
+    //
+    // 배경: v3에서 대칭 여유폭(0.05)을 넣어 '손실 0 = 0점' 문제를 고쳤는데, 반대 극단으로 갔다.
+    //   dda_v4 결과를 실측하니 DDA가 **강도 중앙값 1.00에 굳어 아무것도 안 하고** 일반 적만 보냈다.
+    //   이유: "가만히 있으면 손실 0 → +0.47 확정 / 올렸다 넘치면 점수 급락 + 죽으면 에피소드 종료로
+    //   남은 라운드 보상까지 상실", 게다가 강도는 단조 증가라 한 번 올리면 되돌릴 수 없다.
+    //   → 위험 회피가 기대값상 최적이 되어버렸다.
+    //
+    // 해법: 부족(너무 쉬움)은 **좁은 분모로 세게**, 초과(너무 어려움)는 **넓은 분모로 관대하게** 채점한다.
+    //   "지루하게 만드는 것이 조금 가혹한 것보다 나쁘다"는 DDA의 설계 의도와도 일치한다.
+    //
+    // 예 (목표 0.056): 손실 0 → 0.47 → **0.26** / 목표 적중 → 1.00 / 손실 0.20 → -0.36 → **-0.06**
+    //   시도의 대가가 줄고 가만히 있는 보상이 줄어 "일단 올려보는" 쪽이 유리해진다.
+    public float underTolerance = 0.02f;  // 손실 < 목표 (너무 쉬움) 쪽 여유폭 — 좁게
+    public float overTolerance = 0.08f;   // 손실 > 목표 (너무 어려움) 쪽 여유폭 — 넓게
     public float lingerRefForObs = 8f;      // '여유 시간' 관측 정규화 기준(초). 이 시간 이상 걸리면 1.0
 
     [Header("보상: 초반 보호 (1~2스테이지 1~3라운드는 체력 손실 = 큰 벌)")]
@@ -228,8 +239,10 @@ public class DifficultyAgent : Agent
         {
             // 목표 손실도 곡선에 따라: 중반 살살(easy=1누수), 후반 급가혹(hard)
             float target = Mathf.Lerp(easyTargetLoss, hardTargetLoss, Dc);
-            float denom = Mathf.Max(0.01f, target + lossTolerance); // 여유폭 → 손실 0도 부분 점수
-            reward = 1f - Mathf.Abs(lossFraction - target) / denom;
+            float diff = lossFraction - target;
+            // 부족(너무 쉬움)은 좁은 분모로 세게, 초과(너무 어려움)는 넓은 분모로 관대하게
+            float denom = Mathf.Max(0.01f, target + (diff < 0f ? underTolerance : overTolerance));
+            reward = 1f - Mathf.Abs(diff) / denom;
 
             // 타워 가동률이 minUtil(0.3) 미만이면 마이너스 페널티: 낮을수록 더 큰 벌.
             // 단, 초반(Dc≈0)은 적이 적어 타워가 노는 게 정상 → Dc를 곱해 후반일수록만 세게 문다.
