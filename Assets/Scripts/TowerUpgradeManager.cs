@@ -13,7 +13,10 @@ public class TowerUpgradeManager : MonoBehaviour
     // 업그레이드 행동을 아예 학습하지 못했다(plc_v5 로그에서 모든 타워가 레벨 0으로 확인).
     public float upgradeCostFactor = 1.5f;  // 첫 업그레이드 = 타워 건설비 × 이 값
     public float costGrowthPerLevel = 0.6f; // 레벨당 추가 배율 (× 타워 건설비)
-    public int maxLevel = 5;                // 종류당 최대 레벨
+    // 5 → 8 (2026-08-02). 레벨당 배율을 낮추면서 단계를 늘렸다.
+    // 만렙 DPS는 옛 Lv5의 0.70배인데 총비용은 2.13배 → 후반 골드가 갈 곳이 생기고
+    // "주력 만렙 찍고 나면 살 게 없다"는 엔드게임 정체(잔금 430골드)도 함께 완화된다.
+    public int maxLevel = 8;                // 종류당 최대 레벨
     public int fallbackTowerCost = 100;     // 그 종류 타워를 씬에서 못 찾을 때 기본 건설비
 
     private readonly Dictionary<string, int> levelByType = new Dictionary<string, int>();

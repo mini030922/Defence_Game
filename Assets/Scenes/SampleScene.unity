@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4277054}
   - component: {fileID: 4277053}
+  - component: {fileID: 4277060}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -154,6 +155,22 @@ MonoBehaviour:
   towerCostGrowth: 0.1
   sameTypeCostGrowth: 0.12
   stageCostGrowth: 0.12
+--- !u!114 &4277060
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4277052}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3c6161c974e00144bbb27abae32b2515, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TowerUpgradeManager
+  upgradeCostFactor: 1.5
+  costGrowthPerLevel: 0.6
+  maxLevel: 8
+  fallbackTowerCost: 100
 --- !u!4 &4277054
 Transform:
   m_ObjectHideFlags: 0
@@ -33238,7 +33255,31 @@ MonoBehaviour:
   agent: {fileID: 0}
   bot: {fileID: 0}
   placementAgent: {fileID: 0}
-  enemyTypes: []
+  enemyTypes:
+  - typeName: "\uC77C\uBC18"
+    healthMultiplier: 1
+    speedMultiplier: 1
+    scale: 0.5
+    color: {r: 0.85, g: 0.3, b: 0.3, a: 1}
+    cost: 1
+    leakDamageFraction: 0.05
+    roundHealthGrowth: 0
+  - typeName: "\uBE60\uB984"
+    healthMultiplier: 0.6
+    speedMultiplier: 1.8
+    scale: 0.4
+    color: {r: 0.95, g: 0.85, b: 0.2, a: 1}
+    cost: 1.1
+    leakDamageFraction: 0.04
+    roundHealthGrowth: 0
+  - typeName: "\uD0F1\uCEE4"
+    healthMultiplier: 3
+    speedMultiplier: 0.6
+    scale: 0.8
+    color: {r: 0.55, g: 0.35, b: 0.7, a: 1}
+    cost: 2.5
+    leakDamageFraction: 0.12
+    roundHealthGrowth: 0.18
   killRewardBase: 5
   killRewardStageGrowth: 0.1
   roundGoldStart: 20

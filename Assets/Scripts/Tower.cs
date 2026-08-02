@@ -51,8 +51,16 @@ public class Tower : MonoBehaviour
 
     [Header("업그레이드 (종류 단위: TowerUpgradeManager가 레벨 관리)")]
     public int upgradeLevel = 0;
-    public float damageUpPerLevel = 0.40f; // 레벨당 공격력 +40% (종류 3개부터 업글이 건설보다 이득)
-    public float rateUpPerLevel = 0.33f;   // 레벨당 공격속도(연사) +33% → 투사체도 빨라져 회피 감소
+    // 2026-08-02 — 최대 레벨 5 → 8 확장에 맞춰 레벨당 배율 하향.
+    //   설계 의도: **만렙까지 가는 데 돈은 더 들지만 만렙 자체는 더 약하게.**
+    //   목표는 "새 만렙(Lv8) DPS = 옛 만렙(Lv5) DPS × 0.7". 거기서 역산했다.
+    //     공격력형: 1.40^5 = 5.378배 → 목표 3.765배 → 3.765^(1/8) = 1.180  → +18.0%/레벨
+    //     연사형  : 1.33^5 = 4.162배 → 목표 2.913배 → 2.913^(1/8) = 1.143  → +14.3%/레벨
+    //   업그레이드 비용 공식(upgradeCostFactor 1.5 + 0.6×레벨)은 그대로 두었으므로,
+    //   만렙까지 총비용은 기본가 13.5배 → 28.8배(2.13배)가 되고 화력은 0.70배가 된다.
+    //   = **DPS당 비용이 3.05배**. 강화 일변도 전략을 누르고 후반 골드 소비처를 넓히는 것이 목적.
+    public float damageUpPerLevel = 0.18f; // 레벨당 공격력 +18%
+    public float rateUpPerLevel = 0.143f;  // 레벨당 공격속도(연사) +14.3%
     public bool forceRateUpgrade = false;  // true면 광역이어도 업그레이드가 공격속도↑ (지원 타워)
 
     private float fireTimer = 0f;
