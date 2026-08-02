@@ -45,6 +45,10 @@ public class Projectile : MonoBehaviour
 
         if (area)
         {
+            // 범위를 눈으로 볼 수 있게 착탄 지점에 반투명 원을 띄운다.
+            // 감속을 거는 투사체(지원 타워)면 하늘색, 아니면(폭탄) 회색.
+            SplashEffect.Spawn(target, splashRadius, slowFactor < 1f);
+
             // 착탄 지점 주변 splashRadius 안의 모든 적
             foreach (Enemy e in all)
             {

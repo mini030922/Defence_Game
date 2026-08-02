@@ -146,6 +146,7 @@ public class RoundManager : MonoBehaviour
     //          같은 스테이지에 약한 상대와 강한 상대가 섞이므로,
     //          DDA는 **관측을 읽어서 구분하는 법을 반드시 배워야만** 점수를 받는다.
     public bool showEnemyHealthBars = true; // 적 머리 위 체력바 (학습 시 자동 해제)
+    public bool showSplashEffects  = true; // 광역 공격 범위 표시 (학습 시 자동 해제)
     public bool randomizePlayerPower = false;
     public float playerPowerScale = 1f;   // randomize가 꺼져 있을 때 쓰는 고정값
     public float playerPowerMin = 1f;     // 학습용 하한
@@ -208,6 +209,7 @@ public class RoundManager : MonoBehaviour
 
         // 체력바: --no-graphics(학습)에서는 오브젝트를 아예 만들지 않는다
         Enemy.showHealthBars = showEnemyHealthBars && !Application.isBatchMode;
+        SplashEffect.show    = showSplashEffects  && !Application.isBatchMode;
 
         // 이번 에피소드의 플레이어 화력 배율 확정 (타워가 생성되기 전에 정해야 한다)
         Tower.powerScale = randomizePlayerPower
