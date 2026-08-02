@@ -33260,6 +33260,10 @@ MonoBehaviour:
   randomizeStageForTraining: 0
   maxStageForTraining: 10
   advanceStageOnClear: 1
+  randomizePlayerPower: 0
+  playerPowerScale: 0.7
+  playerPowerMin: 1
+  playerPowerMax: 1
   usePlacementAgent: 0
   allowBuildDuringCombat: 1
   combatDecisionInterval: 1.5

@@ -25,8 +25,8 @@ PrefabInstance:
       value: "\uC9C0\uC6D0 \uD0C0\uC6CC"
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
-      propertyPath: shootingSpeed
-      value: 3
+      propertyPath: slowFactor
+      value: 0.5
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
       propertyPath: targetArea
@@ -34,19 +34,19 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
       propertyPath: splashRadius
-      value: 2.5
+      value: 1.5
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
-      propertyPath: minProjectileSpeed
-      value: 30
-      objectReference: {fileID: 0}
-    - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
-      propertyPath: slowFactor
-      value: 0.5
+      propertyPath: shootingSpeed
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
       propertyPath: forceRateUpgrade
       value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
+      propertyPath: minProjectileSpeed
+      value: 30
       objectReference: {fileID: 0}
     - target: {fileID: 2251631231207654258, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
       propertyPath: m_LocalPosition.x
