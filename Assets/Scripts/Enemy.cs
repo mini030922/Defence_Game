@@ -32,9 +32,9 @@ public class Enemy : MonoBehaviour
     // 학습(--no-graphics)에서는 자동으로 꺼져 오브젝트를 만들지 않는다.
     public static bool showHealthBars = true;
 
-    public static float barWidth = 0.9f;      // 월드 단위
-    public static float barHeight = 0.12f;
-    public static float barHeightOffset = 0.75f; // 적 머리 위 높이
+    public static float barWidth = 1.4f;      // 월드 단위 (적 크기와 무관하게 항상 이 크기)
+    public static float barHeight = 0.18f;
+    public static float barHeadMargin = 0.45f; // 적 머리 꼭대기에서 이만큼 더 위
 
     private Transform barRoot;
     private Transform barFill;
@@ -75,8 +75,17 @@ public class Enemy : MonoBehaviour
 
         GameObject root = new GameObject("HPBar");
         root.transform.SetParent(transform, false);
-        root.transform.localPosition = new Vector3(0f, barHeightOffset / Mathf.Max(0.01f, transform.localScale.y), 0f);
         barRoot = root.transform;
+
+        // 적마다 스케일이 다르다(빠름 0.4 / 일반 0.5 / 탱커 0.8).
+        // 자식은 부모 스케일을 물려받으므로 그대로 두면 **작은 적일수록 체력바도 작아진다**.
+        // 역수를 걸어 상쇄하면 어떤 적이든 체력바가 같은 월드 크기로 보인다.
+        float s = Mathf.Max(0.01f, transform.localScale.y);
+        barRoot.localScale = Vector3.one / s;
+
+        // 캡슐 프리미티브는 기본 높이가 2 → 반높이 = 스케일 × 1.0.
+        // 그 위로 여유를 두지 않으면 체력바가 몸통에 파묻힌다.
+        barRoot.localPosition = new Vector3(0f, 1f + barHeadMargin / s, 0f);
 
         // 배경 (검정)
         GameObject bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
@@ -115,9 +124,10 @@ public class Enemy : MonoBehaviour
     void LateUpdate()
     {
         if (barRoot == null) return;
+        // 카메라 회전을 그대로 복사하는 게 가장 안정적인 빌보드다.
+        // LookRotation(위치차)는 up 벡터가 흔들려 막대가 비스듬히 기울어진다.
         Camera cam = Camera.main;
-        if (cam != null)
-            barRoot.rotation = Quaternion.LookRotation(barRoot.position - cam.transform.position);
+        if (cam != null) barRoot.rotation = cam.transform.rotation;
 
         float ratio = (maxHealth > 0f) ? Mathf.Clamp01(health / maxHealth) : 0f;
         if (barFill != null)
