@@ -10,10 +10,15 @@ public class SplashEffect : MonoBehaviour
 {
     public static bool show = true;
 
-    public static Color bombColor    = new Color(0.62f, 0.62f, 0.66f, 0.42f); // 폭탄 = 회색
-    public static Color supportColor = new Color(0.35f, 0.78f, 1.00f, 0.42f); // 지원 = 하늘색
-    public static float duration = 0.40f;   // 이 시간에 걸쳐 사라짐
-    public static float groundY   = 0.06f;  // 타일 위로 살짝 띄워 z-fighting 방지
+    public static Color bombColor    = new Color(0.75f, 0.75f, 0.80f, 0.60f); // 폭탄 = 회색
+    public static Color supportColor = new Color(0.35f, 0.80f, 1.00f, 0.60f); // 지원 = 하늘색
+    public static float duration = 0.55f;   // 이 시간에 걸쳐 사라짐
+
+    // ⚠ 타일 지오메트리 주의 (2026-08-02 수정)
+    //   타일 = Cube(1×1×1) × scale(0.95, 0.2, 0.95), 중심 y=0  →  차지 범위 -0.10 ~ +0.10
+    //   즉 **타일 윗면이 y=0.10** 이다. 처음에 0.06으로 뒀더니 원판이 타일 속에 파묻혀
+    //   화면에 전혀 보이지 않았다. 윗면보다 확실히 위로 올려야 한다.
+    public static float groundY   = 0.16f;
 
     private static Material sharedMat;
 
@@ -35,7 +40,7 @@ public class SplashEffect : MonoBehaviour
         if (c != null) Destroy(c);
 
         go.transform.position = new Vector3(pos.x, groundY, pos.z);
-        go.transform.localScale = new Vector3(radius * 2f, 0.01f, radius * 2f);
+        go.transform.localScale = new Vector3(radius * 2f, 0.02f, radius * 2f);
 
         Renderer r = go.GetComponent<Renderer>();
         r.shadowCastingMode = ShadowCastingMode.Off;
@@ -59,7 +64,7 @@ public class SplashEffect : MonoBehaviour
             Color c = rend.material.HasProperty("_BaseColor")
                     ? rend.material.GetColor("_BaseColor")
                     : rend.material.color;
-            c.a = startAlpha * (1f - k);              // 서서히 투명해짐
+            c.a = startAlpha * (1f - k * k);          // 초반 진하게 유지 → 끝에서 급히 사라짐
             SetColor(rend.material, c);
         }
     }

@@ -12,6 +12,11 @@ public class BuildManager : MonoBehaviour
     public GameObject[] towerPrefabs;  // 설치할 타워 종류들 (1~5번 키로 선택)
     public Camera cam;                 // 비우면 Camera.main 사용
 
+    [Header("HUD 기준 해상도 (이 해상도에서 1배로 보이도록 고정)")]
+    // OnGUI는 실제 픽셀 좌표라 창 크기에 따라 화면 대비 크기가 달라진다.
+    // 기준 해상도를 정해 GUI.matrix로 배율을 걸면 어느 해상도에서도 같은 비율로 보인다.
+    public Vector2 hudReferenceResolution = new Vector2(1280f, 720f);
+
     [Header("사거리 표시")]
     public Color rangeColor = new Color(1f, 0.92f, 0.2f, 0.9f);
     public float rangeLineWidth = 0.08f;
@@ -27,9 +32,31 @@ public class BuildManager : MonoBehaviour
     private Tower selectedTower;
     private const int RANGE_SEGMENTS = 48;
 
+    [Header("설치 미리보기 (2026-08-02)")]
+    // 좌클릭을 '누른 순간' 설치하지 않고, 누르고 있는 동안 설치 결과를 미리 보여준다.
+    //   누름 → 미리보기 시작 / 드래그 → 칸마다 갱신 / 뗌 → 설치(골드 차감) / 우클릭 → 취소
+    // 사거리가 타워마다 크게 달라서(폭탄 2.0 vs 지원 4.0) 짓고 나서야 아는 문제가 있었다.
+    public Color previewOkColor  = new Color(0.25f, 1f, 0.35f, 0.45f); // 설치 가능 = 초록
+    public Color previewBadColor = new Color(1f, 0.25f, 0.2f, 0.45f);  // 설치 불가 = 빨강
+
+    private bool previewing;
+    private GameObject ghost;        // 반투명 타워 실루엣
+    private int ghostTypeIndex = -1; // 지금 고스트가 어떤 종류인지 (도중에 숫자키로 바꿀 수 있음)
+    private Tile previewTile;
+    private bool previewValid;
+    private int previewCost;
+    private static Material ghostMat;
+
     void Start()
     {
         if (cam == null) cam = Camera.main;
+        HudScaler.reference = hudReferenceResolution;
+    }
+
+    void OnValidate()
+    {
+        if (hudReferenceResolution.x > 1f && hudReferenceResolution.y > 1f)
+            HudScaler.reference = hudReferenceResolution;
     }
 
     void Update()
@@ -45,18 +72,28 @@ public class BuildManager : MonoBehaviour
             if (k.digit5Key.wasPressedThisFrame) SelectTower(4);
         }
 
-        // 왼쪽 클릭으로 설치 (단, 강화 버튼 위 클릭은 무시 → OnGUI가 처리)
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        if (Mouse.current != null)
         {
-            Vector2 mp = Mouse.current.position.ReadValue();
-            // GUI 좌표는 좌상단 원점, 마우스는 좌하단 원점 → y 뒤집어 비교
-            Vector2 gui = new Vector2(mp.x, Screen.height - mp.y);
-            if (upgradePanelRect.Contains(gui)) return;
-            TryBuildAtMouse();
+            // ── 미리보기 진행 중 ──
+            if (previewing)
+            {
+                if (Mouse.current.rightButton.wasPressedThisFrame)      CancelPreview();   // 우클릭 = 취소
+                else if (Mouse.current.leftButton.wasReleasedThisFrame) ConfirmPreview();  // 떼면 설치
+                else if (Mouse.current.leftButton.isPressed)            UpdatePreview();   // 끌면 따라옴
+                else                                                    CancelPreview();   // 안전장치(포커스 상실 등)
+            }
+            // ── 새로 누름 ──
+            else if (Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                // GUI.matrix로 배율이 걸려 있으므로 마우스도 같은 좌표계로 변환해야
+                // 버튼 영역 판정이 어긋나지 않는다.
+                Vector2 gui = HudScaler.MouseToGui(Mouse.current.position.ReadValue());
+                if (!upgradePanelRect.Contains(gui)) OnPressWorld();
+            }
         }
 
         // 선택했던 타워가 사라졌으면(스테이지 리셋·파괴 등) 사거리 표시 끄기
-        if (rangeCircle != null && rangeCircle.enabled && selectedTower == null)
+        if (!previewing && rangeCircle != null && rangeCircle.enabled && selectedTower == null)
             rangeCircle.enabled = false;
     }
 
@@ -73,48 +110,88 @@ public class BuildManager : MonoBehaviour
         return towerPrefabs[selectedIndex];
     }
 
-    void TryBuildAtMouse()
+    // 마우스 아래의 타일을 찾는다 (없으면 null)
+    Tile TileUnderMouse(out Tower existingTower)
     {
-        if (cam == null) return;
+        existingTower = null;
+        if (cam == null) return null;
+        Ray ray = cam.ScreenPointToRay(Mouse.current.position.ReadValue());
+        if (!Physics.Raycast(ray, out RaycastHit hit, 1000f)) return null;
+        existingTower = hit.collider.GetComponentInParent<Tower>();
+        return hit.collider.GetComponentInParent<Tile>();
+    }
 
-        Vector2 mousePos = Mouse.current.position.ReadValue();
-        Ray ray = cam.ScreenPointToRay(mousePos);
-        if (!Physics.Raycast(ray, out RaycastHit hit, 1000f))
+    // 좌클릭을 누른 순간
+    void OnPressWorld()
+    {
+        Tile tile = TileUnderMouse(out Tower existing);
+
+        if (existing != null) { ShowRange(existing); return; }   // 기존 타워 클릭 = 사거리 보기
+        if (tile == null)     { HideRange(); return; }           // 맵 밖
+        if (SelectedPrefab() == null) return;
+
+        previewing = true;
+        HideRange();
+        UpdatePreview();
+    }
+
+    // 누르고 있는 동안 매 프레임: 고스트 위치·색·사거리 원 갱신
+    void UpdatePreview()
+    {
+        GameObject prefab = SelectedPrefab();
+        if (prefab == null) { CancelPreview(); return; }
+
+        // 도중에 숫자키로 종류를 바꿨다면 고스트를 새로 만든다
+        if (ghost == null || ghostTypeIndex != selectedIndex) BuildGhost(prefab);
+
+        Tile tile = TileUnderMouse(out _);
+        previewTile = tile;
+
+        Tower td = prefab.GetComponent<Tower>();
+        string nm = (td != null && !string.IsNullOrEmpty(td.towerName)) ? td.towerName : prefab.name;
+        int baseCost = (td != null) ? td.cost : 0;
+        previewCost = (GameManager.Instance != null)
+                    ? GameManager.Instance.GetScaledCost(baseCost, nm) : baseCost;
+
+        bool afford = GameManager.Instance == null || GameManager.Instance.CanAfford(previewCost);
+        previewValid = (tile != null) && tile.CanBuild() && afford;
+
+        if (tile == null) { if (ghost != null) ghost.SetActive(false); HideRange(); return; }
+
+        if (ghost != null)
         {
-            HideRange(); // 맵 밖(아무것도 안 맞음) 클릭 → 사거리 끄기
-            return;
+            ghost.SetActive(true);
+            ghost.transform.position = tile.transform.position;
+            SetGhostColor(previewValid ? previewOkColor : previewBadColor);
         }
 
-        // 이미 있는 타워를 클릭 → 그 타워의 사거리 표시
-        Tower existing = hit.collider.GetComponentInParent<Tower>();
-        if (existing != null) { ShowRange(existing); return; }
+        float radius = (td != null) ? Mathf.Max(0.1f, td.maxRange + td.rangeBonus) : 1f;
+        Color c = previewValid ? previewOkColor : previewBadColor;
+        c.a = 0.95f;
+        DrawCircle(tile.transform.position, radius, c);
+    }
 
-        // 빈 타일 클릭 → 건설
-        Tile tile = hit.collider.GetComponentInParent<Tile>();
-        if (tile == null) return;
+    // 손을 뗌 → 유효하면 설치
+    void ConfirmPreview()
+    {
+        bool ok = previewValid && previewTile != null;
+        Tile tile = previewTile;
+        EndPreview();
+        if (!ok) return;
 
         GameObject prefab = SelectedPrefab();
         if (prefab == null) return;
 
-        if (!tile.CanBuild())
-        {
-            Debug.Log("여기엔 설치할 수 없어요 (경로이거나 이미 타워가 있음)");
-            return;
-        }
-
-        // 비용 확인 (설치할수록 / 스테이지 오를수록 오른 실제 가격)
         Tower towerData = prefab.GetComponent<Tower>();
         int baseCost = (towerData != null) ? towerData.cost : 0;
-        string builtName = (towerData != null && !string.IsNullOrEmpty(towerData.towerName)) ? towerData.towerName : prefab.name;
-        int cost = (GameManager.Instance != null) ? GameManager.Instance.GetScaledCost(baseCost, builtName) : baseCost;
+        string builtName = (towerData != null && !string.IsNullOrEmpty(towerData.towerName))
+                         ? towerData.towerName : prefab.name;
+        int cost = (GameManager.Instance != null)
+                 ? GameManager.Instance.GetScaledCost(baseCost, builtName) : baseCost;
 
         if (GameManager.Instance != null && !GameManager.Instance.CanAfford(cost))
-        {
-            Debug.Log("골드가 부족해요");
-            return;
-        }
+        { Debug.Log("골드가 부족해요"); return; }
 
-        // 설치!
         GameObject go = Instantiate(prefab, tile.transform.position, Quaternion.identity);
         tile.occupied = true;
 
@@ -127,6 +204,74 @@ public class BuildManager : MonoBehaviour
         // 이미 강화된 종류면 새 타워도 즉시 그 레벨로
         if (TowerUpgradeManager.Instance != null)
             TowerUpgradeManager.Instance.ApplyCurrentLevel(go.GetComponent<Tower>());
+    }
+
+    void CancelPreview() { EndPreview(); }
+
+    void EndPreview()
+    {
+        previewing = false;
+        previewTile = null;
+        previewValid = false;
+        if (ghost != null) { Destroy(ghost); ghost = null; }
+        ghostTypeIndex = -1;
+        HideRange();
+    }
+
+    // 반투명 실루엣 생성: 실제 프리팹을 띄우되 로직·충돌을 제거하고 머티리얼만 갈아끼운다
+    void BuildGhost(GameObject prefab)
+    {
+        if (ghost != null) Destroy(ghost);
+        ghost = Instantiate(prefab);
+        ghost.name = "BuildPreview";
+        ghostTypeIndex = selectedIndex;
+
+        // 타워 로직 제거 (안 그러면 미리보기가 실제로 공격한다)
+        Tower t = ghost.GetComponent<Tower>();
+        if (t != null) Destroy(t);
+        // 충돌 제거 (레이캐스트가 고스트를 맞아 타일을 못 찾는 문제 방지)
+        foreach (Collider c in ghost.GetComponentsInChildren<Collider>(true)) Destroy(c);
+
+        EnsureGhostMat();
+        foreach (Renderer r in ghost.GetComponentsInChildren<Renderer>(true))
+        {
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            Material[] mats = new Material[r.sharedMaterials.Length];
+            for (int i = 0; i < mats.Length; i++) mats[i] = new Material(ghostMat);
+            r.materials = mats;
+        }
+    }
+
+    void SetGhostColor(Color col)
+    {
+        if (ghost == null) return;
+        foreach (Renderer r in ghost.GetComponentsInChildren<Renderer>(true))
+            foreach (Material m in r.materials)
+            {
+                if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", col);
+                if (m.HasProperty("_Color")) m.SetColor("_Color", col);
+            }
+    }
+
+    // 반투명 머티리얼 (URP Unlit은 기본이 불투명이라 블렌딩을 손으로 켜야 한다)
+    static void EnsureGhostMat()
+    {
+        if (ghostMat != null) return;
+        Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
+        if (sh == null) sh = Shader.Find("Sprites/Default");
+        if (sh == null) sh = Shader.Find("Unlit/Color");
+        ghostMat = new Material(sh);
+        if (ghostMat.HasProperty("_Surface"))
+        {
+            ghostMat.SetFloat("_Surface", 1f);
+            ghostMat.SetFloat("_Blend", 0f);
+            ghostMat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            ghostMat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            ghostMat.SetFloat("_ZWrite", 0f);
+            ghostMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            ghostMat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
     }
 
     // 종류 전체 업그레이드 (골드 소비)
@@ -159,20 +304,27 @@ public class BuildManager : MonoBehaviour
         rangeCircle.enabled = false;
     }
 
-    // 타워를 선택해 사거리 원을 그린다
-    void ShowRange(Tower t)
+    // 임의 위치에 사거리 원을 그린다 (설치된 타워 선택 · 설치 미리보기 공용)
+    void DrawCircle(Vector3 pos, float radius, Color col)
     {
-        if (t == null) return;
         EnsureRangeCircle();
-        selectedTower = t;
-        Vector3 center = t.transform.position; center.y += rangeHeight;
-        float radius = Mathf.Max(0.1f, t.AttackRange);  // 보이는 원 = 실제 타격 범위
+        rangeCircle.startColor = col;
+        rangeCircle.endColor = col;
+        Vector3 center = pos; center.y += rangeHeight;
         for (int i = 0; i < RANGE_SEGMENTS; i++)
         {
             float ang = (i / (float)RANGE_SEGMENTS) * Mathf.PI * 2f;
             rangeCircle.SetPosition(i, center + new Vector3(Mathf.Cos(ang) * radius, 0f, Mathf.Sin(ang) * radius));
         }
         rangeCircle.enabled = true;
+    }
+
+    // 타워를 선택해 사거리 원을 그린다
+    void ShowRange(Tower t)
+    {
+        if (t == null) return;
+        selectedTower = t;
+        DrawCircle(t.transform.position, Mathf.Max(0.1f, t.AttackRange), rangeColor);
     }
 
     void HideRange()
@@ -185,12 +337,13 @@ public class BuildManager : MonoBehaviour
     // 임시 화면 표시: 타워 목록 + 종류별 강화 버튼
     void OnGUI()
     {
+        HudScaler.Begin();
         if (towerPrefabs == null) return;
 
         GUIStyle header = new GUIStyle { fontSize = 18 };
         header.normal.textColor = Color.white;
         float y = 122f;
-        GUI.Label(new Rect(12, y, 560, 24), "설치할 타워 (숫자키로 선택, 좌클릭으로 설치):", header);
+        GUI.Label(new Rect(12, y, 560, 24), "설치할 타워 (숫자키 선택 · 좌클릭 누른 채 이동 → 떼면 설치 · 우클릭 취소):", header);
         y += 26f;
 
         for (int i = 0; i < towerPrefabs.Length; i++)

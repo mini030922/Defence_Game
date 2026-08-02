@@ -167,9 +167,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3c6161c974e00144bbb27abae32b2515, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TowerUpgradeManager
-  upgradeCostFactor: 1.5
+  upgradeCostFactor: 2.2
   costGrowthPerLevel: 0.6
-  maxLevel: 8
+  maxLevel: 10
   fallbackTowerCost: 100
 --- !u!4 &4277054
 Transform:
@@ -33301,6 +33301,8 @@ MonoBehaviour:
   randomizeStageForTraining: 0
   maxStageForTraining: 10
   advanceStageOnClear: 1
+  showEnemyHealthBars: 1
+  showSplashEffects: 1
   randomizePlayerPower: 0
   playerPowerScale: 0.7
   playerPowerMin: 1

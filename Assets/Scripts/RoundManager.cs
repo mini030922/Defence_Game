@@ -695,6 +695,7 @@ public class RoundManager : MonoBehaviour
 
     void OnGUI()
     {
+        HudScaler.Begin();
         GUIStyle style = new GUIStyle { fontSize = 20 };
         style.normal.textColor = Color.white;
 
