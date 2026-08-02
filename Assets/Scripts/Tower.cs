@@ -63,7 +63,13 @@ public class Tower : MonoBehaviour
     private float baseShootingSpeed;
     private bool baseCaptured = false;
 
-    void Awake() { CaptureBase(); activeSince = Time.time; }
+    // 플레이어 화력 배율 (2026-08-01 신설). 1.0 = 기본.
+    //  · 계측용: 낮추면 게임이 어려워진다. 사람이 어디서 피를 흘리기 시작하는지 이분탐색으로 잰다.
+    //  · 학습용: 에피소드마다 무작위로 바꿔 DDA가 '상대 실력'을 관측으로 읽도록 강제한다.
+    // 지금까지 DDA는 단 하나의 상대(Placement_v12)만 겪어서 그 실력에 과적합돼 있었다.
+    public static float powerScale = 1f;
+
+    void Awake() { CaptureBase(); ApplyStats(); activeSince = Time.time; }
 
     void CaptureBase()
     {
@@ -145,6 +151,14 @@ public class Tower : MonoBehaviour
     {
         CaptureBase();
         upgradeLevel = Mathf.Max(0, level);
+        ApplyStats();
+    }
+
+    // 기본 스탯 + 업그레이드 레벨 + 화력 배율 → 최종 스탯
+    void ApplyStats()
+    {
+        CaptureBase();
+        float ps = Mathf.Max(0.01f, powerScale);
 
         // 타겟팅 방식에 따라 업그레이드 효과를 분리한다.
         //  - 범위/저격(폭탄=targetArea, 미사일=targetHighestHealth): 레벨당 공격력↑ (공격속도는 유지)
@@ -152,13 +166,13 @@ public class Tower : MonoBehaviour
         bool boostsDamage = (targetArea || targetHighestHealth) && !forceRateUpgrade;
         if (boostsDamage)
         {
-            damage = baseDamage * Mathf.Pow(1f + damageUpPerLevel, upgradeLevel);
+            damage = baseDamage * Mathf.Pow(1f + damageUpPerLevel, upgradeLevel) * ps;
             shootingSpeed = baseShootingSpeed;
         }
         else
         {
             shootingSpeed = baseShootingSpeed * Mathf.Pow(1f / (1f + rateUpPerLevel), upgradeLevel);
-            damage = baseDamage;
+            damage = baseDamage * ps;
         }
     }
     // ────────────────────────────────────────────

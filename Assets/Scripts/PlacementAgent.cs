@@ -80,6 +80,25 @@ public class PlacementAgent : Agent
     public float upgradeRefCount = 3f;       // 그 종류 타워가 이만큼 있으면 1배 (설계상 3개부터 업글이 이득)
     public float upgradeMaxMul = 2f;         // 배율 상한
 
+    // ── 강화 이월 가치 (2026-07-30 신설) ─────────────────────────────────────
+    // 문제: 학습은 '에피소드 = 스테이지 1개'라 에피소드가 스테이지 끝에서 잘린다.
+    //   그런데 실제 게임에서 강화는 **남은 판 전체**에 남는 투자다.
+    //   AI 입장에서는 "이번 스테이지 안에서 회수되지 않는 강화 = 손해"로 보이므로
+    //   강화를 체계적으로 과소투자하도록 학습된다.
+    //   증거(plc_v9 실측): 스테이지 종료 시 남은 골드가 S1 133 → S10 353골드로 증가.
+    //   폭탄 강화가 300골드인데 353골드를 들고 판을 끝낸다. 살 이유가 없어 보이는 것이다.
+    //
+    // 처방: 잘린 지평의 **continuation value를 근사해서 종결 시점에 넣어준다.**
+    //   편법이 아니라 truncated-horizon 문제의 표준 처방이다.
+    //   남은 스테이지 수에 비례 → 초반에 투자할수록 더 오래 회수된다는 사실이 보상에 반영된다.
+    //   S10에서는 남은 판이 없으므로 0 (후반 막판 강화 남발 방지).
+    //
+    // 보상 해킹 방어: **타워를 실제로 보유한 종류의 레벨만** 센다.
+    //   그러지 않으면 시드로 꽂힌 미사일 레벨이 공짜 점수가 되고,
+    //   싼 타워 1개만 세우고 강화만 사재는 전략이 열린다.
+    public float upgradeCarryPerLevel = 0.15f; // 이월 레벨 1당 보상 (× 남은 스테이지 비율)
+    public float upgradeCarryMax = 1.5f;       // 종결 이월 보상 상한
+
     [Header("지원 타워: 감속 가치 (DPS·가동률로는 안 잡히는 간접 효과)")]
     public float slowValueWeight = 0.12f;    // 이번 라운드에 감속을 건 적 비율 × 이 값
 
@@ -166,7 +185,7 @@ public class PlacementAgent : Agent
         {
             float c = 0f;
             if (gm2 != null && towerPrefabs != null && i < towerPrefabs.Length && towerPrefabs[i] != null)
-                c = gm2.GetScaledCost(PrefabCost(i)) / 500f;
+                c = gm2.GetScaledCost(PrefabCost(i), TypeName(i)) / 500f;
             sensor.AddObservation(Mathf.Clamp01(c));
         }
 
@@ -196,7 +215,7 @@ public class PlacementAgent : Agent
         for (int i = 0; i < T; i++)
         {
             int baseCost = towerPrefabs[i] != null ? PrefabCost(i) : int.MaxValue;
-            int cost = (g != null) ? g.GetScaledCost(baseCost) : baseCost;
+            int cost = (g != null) ? g.GetScaledCost(baseCost, TypeName(i)) : baseCost;
             bool ok = anyBuildable && cost <= gold;
             actionMask.SetActionEnabled(0, 1 + i, ok);
         }
@@ -295,7 +314,7 @@ public class PlacementAgent : Agent
             return;
         }
 
-        int cost = g.GetScaledCost(PrefabCost(typeIdx));
+        int cost = g.GetScaledCost(PrefabCost(typeIdx), TypeName(typeIdx));
         if (!g.CanAfford(cost)) return;
 
         // 짓기 전에: '아무도 못 덮던 경로'를 얼마나 새로 덮는지(거리 가중 합) + 이미 같은 종류가 몇 개인지
@@ -305,7 +324,7 @@ public class PlacementAgent : Agent
         g.SpendGold(cost);
         GameObject go = Instantiate(prefab, tile.transform.position, Quaternion.identity);
         tile.occupied = true;
-        g.RegisterTowerBuilt();
+        g.RegisterTowerBuilt(TypeName(typeIdx));
         if (TowerUpgradeManager.Instance != null)
             TowerUpgradeManager.Instance.ApplyCurrentLevel(go.GetComponent<Tower>());
 
@@ -400,6 +419,31 @@ public class PlacementAgent : Agent
         int stage = GameManager.stage;
         float stageNorm = Mathf.Clamp01((stage - 1) / 9f);
         AddReward(clearBonus * (1f + stageRewardWeight * stageNorm));
+
+        // 강화 이월 가치 — 클리어했을 때만 준다. 죽으면 이어질 판이 없으니 이월 가치도 없다.
+        AddReward(UpgradeCarryReward(stage, stageNorm));
+    }
+
+    // 보유 강화의 '남은 판에 대한' 가치. 타워를 실제로 가진 종류만 계산에 넣는다.
+    float UpgradeCarryReward(int stage, float stageNorm)
+    {
+        var upm = TowerUpgradeManager.Instance;
+        if (upm == null || upgradeCarryPerLevel <= 0f) return 0f;
+
+        float remain = 1f - stageNorm;          // S1 = 1.0 (9판 남음) … S10 = 0 (남은 판 없음)
+        if (remain <= 0f) return 0f;
+
+        int levels = 0;
+        for (int i = 0; i < 5; i++)
+        {
+            string nm = TypeName(i);
+            if (string.IsNullOrEmpty(nm)) continue;
+            if (CountTowersOfType(nm) <= 0) continue;   // 안 쓰는 종류의 레벨은 가치 없음
+            levels += upm.GetLevel(nm);
+        }
+        if (levels <= 0) return 0f;
+
+        return Mathf.Min(upgradeCarryMax, upgradeCarryPerLevel * remain * levels);
     }
 
     // ── 헬퍼 ──

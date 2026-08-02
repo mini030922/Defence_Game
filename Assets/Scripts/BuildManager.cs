@@ -105,7 +105,8 @@ public class BuildManager : MonoBehaviour
         // 비용 확인 (설치할수록 / 스테이지 오를수록 오른 실제 가격)
         Tower towerData = prefab.GetComponent<Tower>();
         int baseCost = (towerData != null) ? towerData.cost : 0;
-        int cost = (GameManager.Instance != null) ? GameManager.Instance.GetScaledCost(baseCost) : baseCost;
+        string builtName = (towerData != null && !string.IsNullOrEmpty(towerData.towerName)) ? towerData.towerName : prefab.name;
+        int cost = (GameManager.Instance != null) ? GameManager.Instance.GetScaledCost(baseCost, builtName) : baseCost;
 
         if (GameManager.Instance != null && !GameManager.Instance.CanAfford(cost))
         {
@@ -120,7 +121,7 @@ public class BuildManager : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.SpendGold(cost);
-            GameManager.Instance.RegisterTowerBuilt();
+            GameManager.Instance.RegisterTowerBuilt(builtName);
         }
 
         // 이미 강화된 종류면 새 타워도 즉시 그 레벨로
@@ -199,7 +200,7 @@ public class BuildManager : MonoBehaviour
             Tower t = towerPrefabs[i].GetComponent<Tower>();
             string nm = (t != null && !string.IsNullOrEmpty(t.towerName)) ? t.towerName : towerPrefabs[i].name;
             int c = (t != null) ? t.cost : 0;
-            if (GameManager.Instance != null) c = GameManager.Instance.GetScaledCost(c); // 오른 현재 가격 표시
+            if (GameManager.Instance != null) c = GameManager.Instance.GetScaledCost(c, nm); // 오른 현재 가격 표시(종류별)
 
             GUIStyle s = new GUIStyle { fontSize = 18 };
             s.normal.textColor = (i == selectedIndex) ? Color.yellow : Color.white;

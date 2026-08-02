@@ -65,12 +65,13 @@ public class AutoPlayerBot : MonoBehaviour
         if (spot == null) return;
 
         int baseCost = (data != null) ? data.cost : 0;
-        int cost = gm.GetScaledCost(baseCost);
+        string builtName = (data != null && !string.IsNullOrEmpty(data.towerName)) ? data.towerName : prefab.name;
+        int cost = gm.GetScaledCost(baseCost, builtName);
         if (!gm.SpendGold(cost)) return;
 
         GameObject go = Instantiate(prefab, spot.transform.position, Quaternion.identity);
         spot.occupied = true;
-        gm.RegisterTowerBuilt();
+        gm.RegisterTowerBuilt(builtName);
 
         // 이미 강화된 종류면 새 타워도 즉시 그 레벨로
         if (TowerUpgradeManager.Instance != null)
@@ -101,7 +102,7 @@ public class AutoPlayerBot : MonoBehaviour
             if (p == null) continue;
             Tower t = p.GetComponent<Tower>();
             if (t == null) continue;
-            int c = (GameManager.Instance != null) ? GameManager.Instance.GetScaledCost(t.cost) : t.cost;
+            int c = (GameManager.Instance != null) ? GameManager.Instance.GetScaledCost(t.cost, t.towerName) : t.cost;
             if (c > gold) continue;
 
             affordableAny.Add(p);

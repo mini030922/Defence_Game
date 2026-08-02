@@ -11,7 +11,7 @@ REM
 REM  ※ 사용 전 확인: Unity 를 닫았는가 / Builds\Defence_Game.exe 를 새로 빌드했는가
 REM ─────────────────────────────────────────────────────────────
 
-set RUN=plc_v9
+set RUN=plc_v11
 set YAML=placement.yaml
 set BRAIN=Placement
 set ENVS=6

@@ -151,7 +151,8 @@ MonoBehaviour:
   gold: 400
   startGoldPerStage: 120
   playerHealth: 100
-  towerCostGrowth: 0.15
+  towerCostGrowth: 0.1
+  sameTypeCostGrowth: 0.12
   stageCostGrowth: 0.12
 --- !u!4 &4277054
 Transform:
@@ -27494,9 +27495,9 @@ MonoBehaviour:
   MaxStep: 0
   roundManager: {fileID: 0}
   collector: {fileID: 0}
-  easyTargetLoss: 0.05
-  hardTargetLoss: 0.14
-  difficultyCurve: 1.5
+  easyTargetLoss: 0.065
+  hardTargetLoss: 0.233
+  difficultyCurve: 2.1
   maxStageForTarget: 10
   underTolerance: 0.02
   overTolerance: 0.08
@@ -27508,14 +27509,17 @@ MonoBehaviour:
   lateNeutralStage: 7
   lateNeutralRound: 5
   lateDeathReward: 0
-  maxIntensity: 2
-  intensityStep: 0.2
-  maxHealthMultiplier: 2
-  healthStep: 0.15
+  maxIntensity: 3
+  intensityStep: 0.25
+  maxHealthMultiplier: 2.5
+  healthStep: 0.25
   easyMaxIntensity: 1.3
   easyMaxHealthMultiplier: 1.2
   minUtil: 0.3
   utilPenaltyWeight: 0.6
+  outcomeTolerance: 0.2
+  stageOutcomeWeight: 2
+  outcomeMinReward: -1.5
   intensity: 1
   typeWeights:
   - 0
@@ -27544,7 +27548,7 @@ MonoBehaviour:
     VectorActionDescriptions: []
     VectorActionSpaceType: 1
     hasUpgradedBrainParametersWithActionSpec: 1
-  m_Model: {fileID: 5022602860645237092, guid: d6f1a20c3b7e4d51ab92c8e70f4a1b63, type: 3}
+  m_Model: {fileID: 5022602860645237092, guid: a35f7c8241d94e06b7c2e19d8f5b360a, type: 3}
   m_InferenceDevice: 0
   m_BehaviorType: 2
   m_BehaviorName: Difficulty
@@ -33240,7 +33244,7 @@ MonoBehaviour:
   roundGoldStart: 20
   roundBaseGold: 60
   lateRoundStart: 5
-  lateRoundGold: 25
+  lateRoundGold: 40
   roundsPerStage: 10
   prepTime: 4
   enemyHeight: 0.6
@@ -33252,11 +33256,11 @@ MonoBehaviour:
   roundHealthBase: 10
   roundHealthGrowth: 2
   keepUpgradesAcrossStages: 1
-  upgradeSeedPerStage: 0.7
-  randomizeStageForTraining: 1
+  upgradeSeedScale: 1
+  randomizeStageForTraining: 0
   maxStageForTraining: 10
-  advanceStageOnClear: 0
-  usePlacementAgent: 1
+  advanceStageOnClear: 1
+  usePlacementAgent: 0
   allowBuildDuringCombat: 1
   combatDecisionInterval: 1.5
   maxActionsPerCombatTick: 2
@@ -38973,6 +38977,8 @@ MonoBehaviour:
   upgradeValueWeight: 0.06
   upgradeRefCount: 3
   upgradeMaxMul: 2
+  upgradeCarryPerLevel: 0.15
+  upgradeCarryMax: 1.5
   slowValueWeight: 0.12
   sameTypeSoftCap: 3
   overConcentrationPenalty: 0
@@ -39004,9 +39010,9 @@ MonoBehaviour:
     VectorActionDescriptions: []
     VectorActionSpaceType: 0
     hasUpgradedBrainParametersWithActionSpec: 1
-  m_Model: {fileID: 0}
+  m_Model: {fileID: 5022602860645237092, guid: c17d940e5ba84f28901ab3e6d75c4820, type: 3}
   m_InferenceDevice: 0
-  m_BehaviorType: 0
+  m_BehaviorType: 2
   m_BehaviorName: Placement
   TeamId: 0
   m_UseChildSensors: 1

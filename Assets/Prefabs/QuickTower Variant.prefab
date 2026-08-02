@@ -14,7 +14,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
       propertyPath: damage
-      value: 4.5
+      value: 6.6
       objectReference: {fileID: 0}
     - target: {fileID: 599277436831462972, guid: 14cb32a2d97490b4faada4b39e324565, type: 3}
       propertyPath: maxRange

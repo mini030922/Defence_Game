@@ -33,7 +33,23 @@ public class RoundManager : MonoBehaviour
     public int roundGoldStart = 20;            // 1라운드 시작 수입 (여기서 roundBaseGold까지 점점 증가)
     public int roundBaseGold = 60;             // lateRoundStart 라운드(=5라운드)에서 도달하는 수입
     public int lateRoundStart = 5;             // 이 라운드(0-based)부터 추가 수입 시작 (5 = 6라운드부터)
-    public int lateRoundGold = 25;             // lateRoundStart 이후 라운드마다 누적 추가 (지날수록 +, 짓기·강화 재미)
+    // 25 → 40 (2026-07-31). dda_v9 실측에서 원인이 특정됐다.
+    //
+    // 증상: DDA에게 강도 상한을 3.0까지 열어줬는데 평균 1.46밖에 안 썼다(상한 도달률 1.1%).
+    //   S5는 상한 2.06인데 전 라운드 강도 1.01~1.12로 손도 대지 않았다.
+    // 그런데도 라운드별 손실은:
+    //   S10  R1~R7 0.012~0.111 (목표 0.233의 절반 이하)  →  R9 0.323  R10 0.512
+    //   S5   R1~R8 0.069~0.111                          →  R9 0.134  R10 0.219
+    //   사망의 89%가 R8~R10에 몰림.
+    //
+    // 즉 후반 라운드 절벽을 DDA가 만드는 게 아니라 **기본 게임의 경제**가 만들고 있었다.
+    // 위협은 (4+1.4i)×(10+2i)로 이차식인데 라운드 수입은 선형이라 R9~R10에 구매력이 무너진다.
+    // 강도는 단조 증가라 앞에서 올리면 뒤에서 못 내린다 →
+    // "앞 라운드를 포기하고 참는 것"이 DDA의 기대값상 최적이 되어버렸다.
+    //
+    // 후반 수입을 늘려 R9~R10의 절벽을 완만하게 만들면, DDA가 앞 라운드에서 올릴 여유가 생긴다.
+    //   10라운드 총 수입 875 → 1100골드 (+26%), 증가분은 전부 R6~R10에 집중된다.
+    public int lateRoundGold = 40;             // lateRoundStart 이후 라운드마다 누적 추가
 
     [Header("설정")]
     public int roundsPerStage = 10;
@@ -81,16 +97,58 @@ public class RoundManager : MonoBehaviour
     // 더 큰 문제: 적 총 체력은 S1→S10에 4.33배 커지는데 배치 AI 총 DPS는 1.87배에 그쳐
     //       플레이어에게 성장 레버가 아예 없었다. S10 절벽(클리어율 0.3%)의 직접 원인.
     public bool keepUpgradesAcrossStages = true; // 플레이용: 스테이지가 넘어가도 종류별 강화 레벨 유지
-    // 학습용 시드. 학습은 '에피소드 = 랜덤 스테이지 1개'라 유지만 켜면 배치 AI가 그 가치를 영영 못 배운다.
-    // 에피소드 시작 시 스테이지에 비례한 레벨을 '무작위 종류'에 뿌려주면,
-    // 이미 관측 중인 upgradeLevelByType(관측 13~17번)을 읽고
-    // "이미 강화된 종류를 짓는다"는 전략까지 부수적으로 학습한다.
-    public float upgradeSeedPerStage = 0.7f;     // 스테이지 1당 시드 레벨 (S10 → 약 6레벨이 5종류에 분산)
+
+    // ── 학습용 강화 시드 (2026-07-30 v2: 균등 무작위 → 실측표) ──────────────
+    // v1은 '스테이지당 0.7레벨을 5종류에 무작위'였다. plc_v9 결과로 두 가지가 틀렸음이 드러났다.
+    //
+    //  (1) 배분이 실제와 달랐다. 실측: 미사일 타워를 **0개** 지었는데 평균 레벨 1.18 —
+    //      기대 시드값(0.7×9÷5=1.26)과 정확히 일치. 즉 시드의 약 40%가 안 쓰는 타워에 버려졌다.
+    //      실제 플레이어는 자기가 쓰는 종류에 집중 투자한다.
+    //  (2) 총량이 절반이었다. 각 스테이지 종료 레벨에서 시드분을 빼면 '실제 구매량'이 나오고,
+    //      그걸 누적하면 연속 플레이 시 보유량이 나온다. S10 진입 시점 실측 12.6레벨 vs 시드 6.3레벨.
+    //
+    // 그리고 결정적으로: 연속 플레이라면 **폭탄 타워가 S5~S6에 이미 만렙(Lv5)**이다.
+    // plc_v9는 "주력이 만렙이 됐다, 이제 돈을 어디 쓰지?"라는 후반 게임의 핵심 상황을
+    // 한 번도 경험한 적이 없다. (잔금이 S10에서 353골드씩 남던 이유)
+    //
+    // ※ 이 표는 **하한**이다. 인센티브가 잘린 상태에서 산 양이라, 종결 보상을 넣은 뒤
+    //   다시 측정해서 갱신해야 한다(고정점 반복). plc_v10 결과로 재계산할 것.
+    // ※ 열 순서는 BuildManager.towerPrefabs 순서 = 일반 / 속사 / 폭탄 / 미사일 / 지원.
+    //   프리팹 순서를 바꾸면 이 표도 반드시 같이 바꿔야 한다.
+    public float upgradeSeedScale = 1f;   // 시드 전체 배율 (0 = 시드 끄기, 실험용)
+
+    static readonly float[][] UpgradeSeedTable = new float[][] {
+        //          일반   속사   폭탄  미사일  지원        진입 스테이지
+        new float[]{0.00f, 0.00f, 0.00f, 0.00f, 0.00f}, // S1
+        new float[]{0.50f, 0.06f, 0.75f, 0.00f, 0.14f}, // S2
+        new float[]{1.00f, 0.16f, 1.86f, 0.06f, 0.31f}, // S3
+        new float[]{1.47f, 0.16f, 3.01f, 0.06f, 0.39f}, // S4
+        new float[]{2.03f, 0.18f, 4.29f, 0.06f, 0.50f}, // S5
+        new float[]{2.69f, 0.26f, 5.00f, 0.11f, 0.71f}, // S6  ← 폭탄 만렙 도달
+        new float[]{3.42f, 0.38f, 5.00f, 0.23f, 1.01f}, // S7
+        new float[]{3.99f, 0.38f, 5.00f, 0.23f, 1.20f}, // S8
+        new float[]{4.62f, 0.43f, 5.00f, 0.25f, 1.43f}, // S9
+        new float[]{5.00f, 0.55f, 5.00f, 0.33f, 1.69f}, // S10 ← 일반도 만렙
+    };
 
     [Header("스테이지")]
     public bool randomizeStageForTraining = true; // 학습용: 에피소드마다 스테이지 무작위(전 구간 학습)
     public int maxStageForTraining = 10;
     public bool advanceStageOnClear = false;      // 플레이용: 클리어 시 스테이지 +1
+
+    [Header("플레이어 화력 배율 (2026-08-01 신설) — 계측 및 DDA 일반화용")]
+    // 왜 필요한가: 사람이 13스테이지를 피해 0으로 클리어했다. DDA는 지금까지
+    //   단 하나의 상대(배치 AI)만 겪어서 그 실력에 과적합돼 있고, 사람은 분포 밖이다.
+    //
+    //  · 계측: randomizePlayerPower=false 로 두고 playerPowerScale 을 1.0 → 0.5 → 0.3 …
+    //          낮춰가며 사람이 피를 흘리기 시작하는 지점을 찾는다. 그 역수가 실력 배수다.
+    //  · 학습: randomizePlayerPower=true 로 두면 에피소드마다 [min,max]에서 무작위로 뽑는다.
+    //          같은 스테이지에 약한 상대와 강한 상대가 섞이므로,
+    //          DDA는 **관측을 읽어서 구분하는 법을 반드시 배워야만** 점수를 받는다.
+    public bool randomizePlayerPower = false;
+    public float playerPowerScale = 1f;   // randomize가 꺼져 있을 때 쓰는 고정값
+    public float playerPowerMin = 1f;     // 학습용 하한
+    public float playerPowerMax = 1f;     // 학습용 상한 (계측 결과로 정한다)
 
     [Header("최적 배치 AI")]
     public bool usePlacementAgent = false; // true면 정비 단계에 봇 대신 PlacementAgent가 타워 배치
@@ -147,6 +205,11 @@ public class RoundManager : MonoBehaviour
         if (randomizeStageForTraining)
             GameManager.stage = Random.Range(1, maxStageForTraining + 1);
 
+        // 이번 에피소드의 플레이어 화력 배율 확정 (타워가 생성되기 전에 정해야 한다)
+        Tower.powerScale = randomizePlayerPower
+            ? Random.Range(playerPowerMin, playerPowerMax)
+            : Mathf.Max(0.01f, playerPowerScale);
+
         if (GameManager.Instance != null)
             GameManager.Instance.ResetForNewStage();
 
@@ -196,27 +259,23 @@ public class RoundManager : MonoBehaviour
     void SeedUpgradeLevels()
     {
         var upm = TowerUpgradeManager.Instance;
-        if (upm == null || upgradeSeedPerStage <= 0f) return;
-
-        int total = Mathf.RoundToInt(upgradeSeedPerStage * (GameManager.stage - 1));
-        if (total <= 0) return;
+        if (upm == null || upgradeSeedScale <= 0f) return;
 
         List<string> names = TowerTypeNames();
         if (names.Count == 0) return;
 
-        for (int k = 0; k < total; k++)
+        int row = Mathf.Clamp(GameManager.stage - 1, 0, UpgradeSeedTable.Length - 1);
+        float[] want = UpgradeSeedTable[row];
+
+        for (int i = 0; i < names.Count && i < want.Length; i++)
         {
-            // 무작위 종류에 1레벨. 이미 최대면 다른 종류를 찾아본다(전부 최대면 중단).
-            bool placed = false;
-            for (int attempt = 0; attempt < names.Count * 2; attempt++)
-            {
-                string nm = names[Random.Range(0, names.Count)];
-                if (string.IsNullOrEmpty(nm) || upm.IsMaxed(nm)) continue;
-                upm.SetLevel(nm, upm.GetLevel(nm) + 1);
-                placed = true;
-                break;
-            }
-            if (!placed) break;
+            float v = want[i] * upgradeSeedScale;
+            if (v <= 0f) continue;
+            // 소수점은 확률로 처리 → 평균은 표값을 유지하면서 에피소드마다 편차가 생긴다.
+            // (항상 평균값만 주면 AI가 한 가지 상태만 보고 일반화를 못 한다)
+            int lv = Mathf.FloorToInt(v);
+            if (Random.value < (v - lv)) lv++;
+            if (lv > 0) upm.SetLevel(names[i], lv);
         }
     }
 
@@ -344,6 +403,11 @@ public class RoundManager : MonoBehaviour
         state = State.StageClear;
         Debug.Log("스테이지 클리어! 🎉");
         if (collector != null) collector.LogComposition(true, roundsPerStage, roundsPerStage);
+        if (agent != null)
+        {
+            float hp = (GameManager.Instance != null) ? GameManager.Instance.HealthRatio() : 0f;
+            agent.GradeStageEnd(true, roundsPerStage, roundsPerStage, hp);
+        }
         if (advanceStageOnClear)
             GameManager.stage = Mathf.Max(1, GameManager.stage + 1); // 플레이용 진행
         yield return new WaitForSeconds(1.5f); // 결과 잠깐 표시
@@ -411,6 +475,7 @@ public class RoundManager : MonoBehaviour
         state = State.StageFail;
         Debug.Log("스테이지 실패...");
         if (collector != null) collector.LogComposition(false, currentRound + 1, roundsPerStage);
+        if (agent != null) agent.GradeStageEnd(false, currentRound + 1, roundsPerStage, 0f);
         if (usePlacementAgent && placementAgent != null)
         {
             placementAgent.GradeDied();
