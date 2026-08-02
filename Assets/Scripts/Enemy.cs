@@ -26,6 +26,21 @@ public class Enemy : MonoBehaviour
     // 이번 라운드에 적이 도달한 최대 경로 진행도(0~1). 골에 안 샜어도 '얼마나 아슬아슬했나'를 나타낸다.
     public static float maxProgressThisRound = 0f;
 
+    // ── 체력바 (2026-08-01 신설) ─────────────────────────────────────────
+    // 화력 배율(Tower.powerScale)을 조절하며 체감을 재는 중이라, 적이 어디서 얼마나
+    // 버티는지 눈으로 봐야 한다. 프리팹 없이 코드로 만든다(적 자체가 런타임 생성이라).
+    // 학습(--no-graphics)에서는 자동으로 꺼져 오브젝트를 만들지 않는다.
+    public static bool showHealthBars = true;
+
+    public static float barWidth = 0.9f;      // 월드 단위
+    public static float barHeight = 0.12f;
+    public static float barHeightOffset = 0.75f; // 적 머리 위 높이
+
+    private Transform barRoot;
+    private Transform barFill;
+    private static Material barBgMat;
+    private static Material barFillMat;
+
     // 외부(스포너/게임매니저)에서 결과를 받기 위한 콜백
     public System.Action<Enemy> onReachedEnd; // 골 도달
     public System.Action<Enemy> onDied;        // 사망
@@ -40,6 +55,76 @@ public class Enemy : MonoBehaviour
         moveSpeed = speed;
         baseMoveSpeed = speed;
         targetIndex = 0;
+        if (showHealthBars) BuildHealthBar();
+    }
+
+    void BuildHealthBar()
+    {
+        if (barRoot != null) return;
+
+        // 공용 머티리얼 (적마다 새로 만들면 드로우콜·GC가 터진다)
+        if (barBgMat == null)
+        {
+            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
+            if (sh == null) sh = Shader.Find("Unlit/Color");
+            if (sh == null) sh = Shader.Find("Sprites/Default");
+            barBgMat = new Material(sh);   barBgMat.color = new Color(0.05f, 0.05f, 0.05f, 1f);
+            barFillMat = new Material(sh); barFillMat.color = Color.green;
+            SetMatColor(barBgMat, new Color(0.05f, 0.05f, 0.05f, 1f));
+        }
+
+        GameObject root = new GameObject("HPBar");
+        root.transform.SetParent(transform, false);
+        root.transform.localPosition = new Vector3(0f, barHeightOffset / Mathf.Max(0.01f, transform.localScale.y), 0f);
+        barRoot = root.transform;
+
+        // 배경 (검정)
+        GameObject bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        Destroy(bg.GetComponent<Collider>());
+        bg.name = "BG";
+        bg.transform.SetParent(root.transform, false);
+        bg.transform.localScale = new Vector3(barWidth, barHeight, 1f);
+        bg.GetComponent<Renderer>().sharedMaterial = barBgMat;
+
+        // 채움 (초록→빨강). 피벗을 왼쪽으로 옮기려고 한 겹 더 감싼다.
+        GameObject pivot = new GameObject("FillPivot");
+        pivot.transform.SetParent(root.transform, false);
+        pivot.transform.localPosition = new Vector3(-barWidth * 0.5f, 0f, -0.01f);
+        GameObject fill = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        Destroy(fill.GetComponent<Collider>());
+        fill.name = "Fill";
+        fill.transform.SetParent(pivot.transform, false);
+        fill.transform.localPosition = new Vector3(0.5f, 0f, 0f);   // 왼쪽 끝 기준으로 자라게
+        fill.transform.localScale = new Vector3(1f, barHeight * 0.8f, 1f);
+        Renderer fr = fill.GetComponent<Renderer>();
+        fr.material = new Material(barFillMat);   // 색을 개별로 바꿔야 하니 인스턴스
+        barFill = pivot.transform;
+        barFill.localScale = new Vector3(barWidth, 1f, 1f);
+        fillRenderer = fr;
+    }
+
+    private Renderer fillRenderer;
+
+    static void SetMatColor(Material m, Color c)
+    {
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
+        if (m.HasProperty("_Color")) m.SetColor("_Color", c);
+    }
+
+    // 카메라를 향하게 세우고 남은 체력만큼 채운다.
+    void LateUpdate()
+    {
+        if (barRoot == null) return;
+        Camera cam = Camera.main;
+        if (cam != null)
+            barRoot.rotation = Quaternion.LookRotation(barRoot.position - cam.transform.position);
+
+        float ratio = (maxHealth > 0f) ? Mathf.Clamp01(health / maxHealth) : 0f;
+        if (barFill != null)
+            barFill.localScale = new Vector3(barWidth * ratio, 1f, 1f);
+        if (fillRenderer != null)
+            SetMatColor(fillRenderer.material,
+                        Color.Lerp(new Color(0.9f, 0.15f, 0.15f), new Color(0.2f, 0.9f, 0.25f), ratio));
     }
 
     void Update()
