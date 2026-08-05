@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 // 한 라운드(= 단일 웨이브)의 구성 데이터
 [System.Serializable]
@@ -117,18 +118,37 @@ public class RoundManager : MonoBehaviour
     //   프리팹 순서를 바꾸면 이 표도 반드시 같이 바꿔야 한다.
     public float upgradeSeedScale = 1f;   // 시드 전체 배율 (0 = 시드 끄기, 실험용)
 
+    //
+    // ── 2026-08-04 v3: 가격 개편에 맞춰 재환산 ────────────────────────────
+    // v2 표는 `upgradeCostFactor 1.5` · `maxLevel 5` 시절의 실측 역산값이다.
+    // 그 뒤 강화 비용이 오르고(1.5 → 2.2) 최대 레벨이 열렸으므로(5 → 10) 그대로 쓰면
+    // **플레이어가 낸 적 없는 골드만큼 공짜로 강해진 채로** 배치 AI가 학습한다.
+    //
+    // 환산 원리는 '같은 골드로 살 수 있는 레벨'이다. 누적 강화비를 건설비 단위로 쓰면
+    //     비용(L) = f·L + 0.6·L(L−1)/2 = 0.3L² + (f−0.3)L
+    //     옛(f=1.5): 0.3L² + 1.2L      새(f=2.2): 0.3L² + 1.9L
+    // 두 식을 같게 두고 L을 풀면 새 레벨이 나온다. 스테이지별 강화 총액(골드)은 정확히 보존된다.
+    //   S5  2,658골드 → 2,658골드,  S10 4,730골드 → 4,730골드 (설계상 동일)
+    //
+    // 레벨 수치는 내려갔지만 그게 약화는 아니다. 레벨당 효과도 같이 바뀌었기 때문:
+    //   옛 +40%/레벨 → Lv5에서 ×5.38     새 +14.2%/레벨 → Lv5에서 ×1.94
+    // (사용자 설계: "최대레벨 DPS를 옛 최대레벨의 0.7배로, 대신 더 많은 돈이 들게")
+    //
+    // ※ 폭탄 S6~S10은 **하한**이다. 옛 측정이 Lv5 천장에 막혀 있던 구간이라
+    //   "얼마나 더 사고 싶었는지"를 표에서 복원할 수 없다(당시 S10에서 353골드가 남아돌던 이유).
+    //   plc_v13 로그로 재측정하면 이 칸들이 먼저 올라갈 것이다. 고정점 반복 2회차.
     static readonly float[][] UpgradeSeedTable = new float[][] {
         //          일반   속사   폭탄  미사일  지원        진입 스테이지
         new float[]{0.00f, 0.00f, 0.00f, 0.00f, 0.00f}, // S1
-        new float[]{0.50f, 0.06f, 0.75f, 0.00f, 0.14f}, // S2
-        new float[]{1.00f, 0.16f, 1.86f, 0.06f, 0.31f}, // S3
-        new float[]{1.47f, 0.16f, 3.01f, 0.06f, 0.39f}, // S4
-        new float[]{2.03f, 0.18f, 4.29f, 0.06f, 0.50f}, // S5
-        new float[]{2.69f, 0.26f, 5.00f, 0.11f, 0.71f}, // S6  ← 폭탄 만렙 도달
-        new float[]{3.42f, 0.38f, 5.00f, 0.23f, 1.01f}, // S7
-        new float[]{3.99f, 0.38f, 5.00f, 0.23f, 1.20f}, // S8
-        new float[]{4.62f, 0.43f, 5.00f, 0.25f, 1.43f}, // S9
-        new float[]{5.00f, 0.55f, 5.00f, 0.33f, 1.69f}, // S10 ← 일반도 만렙
+        new float[]{0.34f, 0.04f, 0.52f, 0.00f, 0.09f}, // S2
+        new float[]{0.71f, 0.10f, 1.41f, 0.04f, 0.20f}, // S3
+        new float[]{1.08f, 0.10f, 2.41f, 0.04f, 0.26f}, // S4
+        new float[]{1.55f, 0.12f, 3.59f, 0.04f, 0.34f}, // S5
+        new float[]{2.13f, 0.17f, 4.25f, 0.07f, 0.49f}, // S6  ← 여기부터 폭탄은 하한(옛 Lv5 천장)
+        new float[]{2.78f, 0.25f, 4.25f, 0.15f, 0.72f}, // S7
+        new float[]{3.31f, 0.25f, 4.25f, 0.15f, 0.87f}, // S8
+        new float[]{3.89f, 0.29f, 4.25f, 0.16f, 1.05f}, // S9
+        new float[]{4.25f, 0.37f, 4.25f, 0.22f, 1.27f}, // S10
     };
 
     [Header("스테이지")]
@@ -152,6 +172,30 @@ public class RoundManager : MonoBehaviour
     public float playerPowerMin = 1f;     // 학습용 하한
     public float playerPowerMax = 1f;     // 학습용 상한 (계측 결과로 정한다)
 
+    [Header("정비·예고·배속 (2026-08-04 플레이테스트 반영)")]
+    // 테스터 지적 3가지를 한 묶음으로 고친다.
+    //
+    //  (1) "스테이지 변경 후 맵을 확인할 시간을 줘야 함"
+    //      → firstRoundExtraPrep. 경로가 매 스테이지 새로 생성되는데 정비 5초는 읽을 시간도 안 된다.
+    //
+    //  (2) "AI가 빠른 적으로 속사를 유도하고 마지막에 탱커 10마리를 몰아 보낸다"
+    //      → showWavePreview. 이건 DDA의 버그가 아니라 **정보 비대칭**이다.
+    //        DDA는 플레이어의 종류별 타워 구성(관측 15~19번)을 보고 반례를 고르는데,
+    //        플레이어는 스폰이 시작되고 나서야 뭐가 오는지 안다. 한쪽만 상대 패를 보는 게임이었다.
+    //        DDA가 구성을 확정한 '뒤에' 짧은 예고 + 2차 정비창을 준다.
+    //        → 난이도는 그대로 두고 '농락'만 제거한다. (예고를 봐도 돈이 없으면 여전히 어렵다)
+    //
+    //  (3) "적이 타워 사거리를 벗어나면 손가락 빨면서 기다려야 함"
+    //      → 배속 버튼. 죽은 시간을 플레이어가 직접 건너뛴다.
+    //
+    // ※ 셋 다 학습(배치 AI / --no-graphics)에서는 자동으로 꺼진다.
+    //   학습 환경이 바뀌면 dda_v11 · plc_v12 가 배운 환경과 달라져 재학습이 필요해지기 때문.
+    public float firstRoundExtraPrep = 8f; // 스테이지 첫 라운드에만 추가로 주는 정비 시간(초)
+    public bool showWavePreview = true;    // 다음 웨이브 예고 + 2차 정비창
+    public float previewTime = 7f;         // 예고 창 길이(초)
+    public bool allowSpeedControl = true;  // 배속 버튼
+    public float[] speedOptions = new float[] { 1f, 2f, 3f };
+
     [Header("최적 배치 AI")]
     public bool usePlacementAgent = false; // true면 정비 단계에 봇 대신 PlacementAgent가 타워 배치
 
@@ -160,9 +204,17 @@ public class RoundManager : MonoBehaviour
     public float combatDecisionInterval = 1.5f; // 전투 중 배치 AI에게 결정을 묻는 간격(초)
     public int maxActionsPerCombatTick = 2;     // 한 틱에 내릴 수 있는 최대 결정 수
 
-    private enum State { Prep, Spawning, Fighting, StageClear, StageFail }
+    private enum State { Prep, Preview, Spawning, Fighting, StageClear, StageFail }
     private State state = State.Prep;
     private int currentRound = 0;
+
+    // ── 사람 플레이 전용 UX 상태 ────────────────────────────
+    // HumanUx가 false면(학습·배치AI) 예고창·배속·스킵이 전부 무효가 된다.
+    private bool HumanUx => !Application.isBatchMode && !usePlacementAgent;
+    private float previewRemaining = 0f;
+    private string pendingWaveText = "";
+    private bool skipRequested = false;
+    private int speedIndex = 0;
 
     // 배치 에이전트 관찰용 접근자
     public int CurrentRound => currentRound;
@@ -192,6 +244,27 @@ public class RoundManager : MonoBehaviour
             StartEpisode();
     }
 
+    void Update()
+    {
+        if (!HumanUx) return;
+        var kb = Keyboard.current;
+        if (kb == null) return;
+        // 스페이스 = 정비/예고 즉시 종료, Tab = 배속 순환
+        if (kb.spaceKey.wasPressedThisFrame && (state == State.Prep || state == State.Preview))
+            skipRequested = true;
+        if (kb.tabKey.wasPressedThisFrame && allowSpeedControl)
+            SetSpeed(speedIndex + 1);
+    }
+
+    // 배속 변경. 학습에서는 mlagents가 --time-scale로 Time.timeScale을 직접 잡고 있으므로
+    // 절대 건드리지 않는다(건드리면 학습 속도가 20배에서 1배로 떨어진다).
+    void SetSpeed(int i)
+    {
+        if (!HumanUx || speedOptions == null || speedOptions.Length == 0) return;
+        speedIndex = ((i % speedOptions.Length) + speedOptions.Length) % speedOptions.Length;
+        Time.timeScale = Mathf.Max(0.1f, speedOptions[speedIndex]);
+    }
+
     // ── 에피소드(스테이지 한 판) 시작 ─────────────────────────
     public void StartEpisode()
     {
@@ -210,6 +283,10 @@ public class RoundManager : MonoBehaviour
         // 체력바: --no-graphics(학습)에서는 오브젝트를 아예 만들지 않는다
         Enemy.showHealthBars = showEnemyHealthBars && !Application.isBatchMode;
         SplashEffect.show    = showSplashEffects  && !Application.isBatchMode;
+
+        // 새 스테이지는 1배속으로 시작한다 (앞 스테이지 끝에 3배로 두고 넘어오면 맵을 볼 수가 없다).
+        // 학습에서는 mlagents가 Time.timeScale을 잡고 있으므로 절대 손대지 않는다.
+        if (HumanUx && allowSpeedControl) SetSpeed(0);
 
         // 이번 에피소드의 플레이어 화력 배율 확정 (타워가 생성되기 전에 정해야 한다)
         Tower.powerScale = randomizePlayerPower
@@ -345,11 +422,16 @@ public class RoundManager : MonoBehaviour
             }
             else
             {
-                prepRemaining = prepTime;
-                while (prepRemaining > 0f)
+                // 스테이지 첫 라운드에는 새 맵을 읽을 시간을 더 준다.
+                // (경로가 에피소드마다 새로 생성되는데 5초로는 어디가 길인지도 못 본다)
+                prepRemaining = prepTime + ((currentRound == 0 && HumanUx) ? firstRoundExtraPrep : 0f);
+                skipRequested = false;
+                while (prepRemaining > 0f && !skipRequested)
                 {
                     if (IsPlayerDead()) { EndRoundFail(); yield break; }
-                    prepRemaining -= Time.deltaTime;
+                    // 배속은 '전투'만 빨라져야 한다. 정비 시간까지 같이 줄면 배속의 의미가 없다.
+                    // 단, 배치 봇 학습(batchMode)에서는 원래대로 스케일된 시간을 써야 학습 속도가 유지된다.
+                    prepRemaining -= HumanUx ? Time.unscaledDeltaTime : Time.deltaTime;
                     yield return null;
                 }
             }
@@ -364,6 +446,23 @@ public class RoundManager : MonoBehaviour
             }
 
             RoundData round = BuildRound(currentRound);
+
+            // ── 다음 웨이브 예고 + 2차 정비창 ──────────────────────────────
+            // DDA가 구성을 확정한 '뒤'라서, 플레이어도 이제 상대 패를 본 상태에서 대응할 수 있다.
+            // 이 창 동안에도 건설·강화·판매·이동이 전부 가능하다.
+            if (HumanUx && showWavePreview && previewTime > 0f)
+            {
+                pendingWaveText = DescribeRound(round);
+                state = State.Preview;
+                previewRemaining = previewTime;
+                skipRequested = false;
+                while (previewRemaining > 0f && !skipRequested)
+                {
+                    if (IsPlayerDead()) { EndRoundFail(); yield break; }
+                    previewRemaining -= Time.unscaledDeltaTime;
+                    yield return null;
+                }
+            }
 
             healthAtRoundStart = (GameManager.Instance != null) ? GameManager.Instance.playerHealth : 0;
             leakedThisRound = 0;
@@ -547,6 +646,26 @@ public class RoundManager : MonoBehaviour
         };
     }
 
+    // 예고창에 띄울 웨이브 요약 — 종류 × 마리수 (개체 체력).
+    // 체력을 같이 보여주는 이유: "탱커 12마리"만으로는 폭탄을 더 지어야 할지 강화해야 할지 판단이 안 된다.
+    string DescribeRound(RoundData r)
+    {
+        var sb = new System.Text.StringBuilder();
+        int total = 0;
+        for (int t = 0; t < r.typeCounts.Count && t < enemyTypes.Count; t++)
+        {
+            int c = r.typeCounts[t];
+            if (c <= 0) continue;
+            EnemyType et = enemyTypes[t];
+            float hp = r.baseHealth * et.healthMultiplier * (1f + et.roundHealthGrowth * currentRound);
+            if (sb.Length > 0) sb.Append("    ");
+            sb.Append($"{et.typeName} ×{c} (체력 {hp:0})");
+            total += c;
+        }
+        if (sb.Length == 0) sb.Append("(없음)");
+        return $"{sb}        총 {total}마리";
+    }
+
     void GenerateDefaultTypes()
     {
         enemyTypes.Add(new EnemyType {
@@ -703,7 +822,11 @@ public class RoundManager : MonoBehaviour
         switch (state)
         {
             case State.Prep:
-                line = $"라운드 {currentRound + 1}/{roundsPerStage} — 정비 시간 {prepRemaining:0.0}초";
+                line = $"라운드 {currentRound + 1}/{roundsPerStage} — 정비 시간 {prepRemaining:0.0}초"
+                     + (HumanUx ? "  (Space: 바로 시작)" : "");
+                break;
+            case State.Preview:
+                line = $"라운드 {currentRound + 1}/{roundsPerStage} — 웨이브 예고 {previewRemaining:0.0}초  (Space: 바로 시작)";
                 break;
             case State.Spawning:
             case State.Fighting:
@@ -720,5 +843,46 @@ public class RoundManager : MonoBehaviour
                 break;
         }
         GUI.Label(new Rect(12, 94, 600, 28), line, style);
+
+        DrawWavePreview();
+        DrawSpeedControls();
+    }
+
+    // 화면 상단 중앙~우측의 예고 상자. 좌측 열(골드/체력/타워 목록)과 겹치지 않는 x부터 그린다.
+    void DrawWavePreview()
+    {
+        if (state != State.Preview || string.IsNullOrEmpty(pendingWaveText)) return;
+
+        Rect box = new Rect(430f, 8f, 640f, 74f);
+        GUI.Box(box, GUIContent.none);
+
+        GUIStyle title = new GUIStyle { fontSize = 19, alignment = TextAnchor.MiddleCenter };
+        title.normal.textColor = new Color(1f, 0.85f, 0.35f);
+        GUI.Label(new Rect(box.x, box.y + 6f, box.width, 26f),
+                  $"다음 웨이브 — {previewRemaining:0.0}초 후 시작", title);
+
+        GUIStyle body = new GUIStyle { fontSize = 16, alignment = TextAnchor.MiddleCenter };
+        body.normal.textColor = Color.white;
+        GUI.Label(new Rect(box.x + 8f, box.y + 34f, box.width - 16f, 34f), pendingWaveText, body);
+    }
+
+    // 배속 + 즉시 시작. 죽은 시간(사거리 밖 적을 기다리는 구간)을 플레이어가 직접 건너뛴다.
+    void DrawSpeedControls()
+    {
+        if (!HumanUx || !allowSpeedControl || speedOptions == null) return;
+
+        for (int i = 0; i < speedOptions.Length; i++)
+        {
+            GUIStyle bs = new GUIStyle(GUI.skin.button) { fontSize = 15 };
+            if (i == speedIndex) bs.normal.textColor = Color.yellow;
+            if (GUI.Button(new Rect(1086f + i * 48f, 8f, 44f, 26f), $"{speedOptions[i]:0.#}x", bs))
+                SetSpeed(i);
+        }
+
+        if (state == State.Prep || state == State.Preview)
+        {
+            if (GUI.Button(new Rect(1086f, 38f, 140f, 26f), "▶ 바로 시작"))
+                skipRequested = true;
+        }
     }
 }

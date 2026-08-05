@@ -4,7 +4,7 @@ using Unity.MLAgents.Sensors;
 // 배치 AI의 '맵 그리드' 관측을 평면 벡터가 아니라 **이미지(채널×높이×너비)**로 내보내는 커스텀 센서 컴포넌트.
 //
 // 왜 바꿨나 (2026-07-26):
-//   그리드를 벡터로 넣으면(20×16×8 = 2560개) 신경망 첫 레이어가 2560×256 ≈ 65만 파라미터를 먹는다.
+//   그리드를 벡터로 넣으면(16×12×8 = 1536개) 신경망 첫 레이어가 1536×256 ≈ 39만 파라미터를 먹는다.
 //   그보다 더 큰 문제는 **타일 위치마다 가중치가 따로**라는 것. "경로가 접히는 모퉁이 옆이 좋은 자리"라는
 //   패턴을 맵 왼쪽에서 배워도, 오른쪽에서 같은 모양이 나오면 처음부터 다시 배워야 한다.
 //   (경로 근접도·밀집도 채널을 손으로 만들어 넣은 것도 MLP가 스스로 못 해서였다.)
@@ -21,8 +21,8 @@ using Unity.MLAgents.Sensors;
 public class PlacementGridSensorComponent : SensorComponent
 {
     [Header("그리드 크기 (PlacementAgent와 같아야 함)")]
-    public int gridW = 20;
-    public int gridH = 16;
+    public int gridW = 16;
+    public int gridH = 12;
 
     [Header("파생 채널 계산 기준")]
     public float proxRef = 5f;            // 경로 근접도: 가장 가까운 경로가 이 거리 이상이면 0

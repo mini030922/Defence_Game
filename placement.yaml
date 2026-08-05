@@ -1,7 +1,7 @@
 # Placement AI (optimal tower placement) training config - PPO
-# Observations = vector 29 (scalars) + visual grid 8 x 16 x 20 (PlacementGridSensor, CNN)
+# Observations = vector 29 (scalars) + visual grid 8 x 12 x 16 (PlacementGridSensor, CNN)
 # grid channels: buildable / path / tower / pathProgress / pathProximity / pathDensity / enemyDensity / towerUtil
-# Actions = 3 discrete branches: [1+2*towerTypes, GRID_W, GRID_H] = default [11, 20, 16]
+# Actions = 3 discrete branches: [1+2*towerTypes, GRID_W, GRID_H] = default [11, 16, 12]
 # Behavior Name must be: Placement
 behaviors:
   Placement:

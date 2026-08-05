@@ -22,14 +22,14 @@ using Unity.MLAgents.Sensors;
 //   - Vector Observation > Space Size = **29** (스칼라만. 그리드는 PlacementGridSensor가 따로 냄)
 //   - 같은 GameObject에 PlacementGridSensorComponent를 붙일 것
 //   - placement.yaml: vis_encode_type: match3
-//   - Actions > Discrete Branches = 3, 크기 = [1+2*타워종류수, GRID_W, GRID_H] = 기본 [11, 20, 16]
+//   - Actions > Discrete Branches = 3, 크기 = [1+2*타워종류수, GRID_W, GRID_H] = 기본 [11, 16, 12]
 //   - Behavior Type = Default(학습) / Inference Only(고정 상대로 쓸 때)
 //   - DecisionRequester는 붙이지 말 것 (RequestDecision을 코드에서 직접 호출)
 public class PlacementAgent : Agent
 {
     [Header("그리드 최대 크기 (실제 그리드 ≤ 이 값이어야 함)")]
-    public int gridW = 20;
-    public int gridH = 16;
+    public int gridW = 16;
+    public int gridH = 12;
     // v7: 맵 그리드 8채널은 이제 **PlacementGridSensor**(커스텀 이미지 센서)가 따로 내보낸다.
     //     여기(CollectObservations)에는 스칼라 29개만 남는다. Space Size = 29.
     // 12 → 17 (v5): 종류별 '업그레이드 레벨' 5개.  17 → 29 (v6): 직전 라운드 누수·손실 2개 +

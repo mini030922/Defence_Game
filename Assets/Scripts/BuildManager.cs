@@ -39,6 +39,24 @@ public class BuildManager : MonoBehaviour
     public Color previewOkColor  = new Color(0.25f, 1f, 0.35f, 0.45f); // 설치 가능 = 초록
     public Color previewBadColor = new Color(1f, 0.25f, 0.2f, 0.45f);  // 설치 불가 = 빨강
 
+    [Header("타워 판매·이동 (2026-08-04 플레이테스트 반영)")]
+    // 테스터 지적: "AI가 빠른 적을 계속 보내 속사 타워를 깔게 유도하고, 마지막에 탱커를 몰아 보낸다."
+    // DDA는 잘못 학습한 게 아니다 — 우리가 준 보상을 가장 싸게 달성하는 방법을 찾았을 뿐이다.
+    // 진짜 문제는 **플레이어에게 되돌릴 수단이 없다는 것**이었다:
+    //   · 타워를 팔 수 없어서 유도당한 배치가 그대로 굳고
+    //   · 강화가 종류 단위라 종류를 갈아타면 투자한 골드가 전부 날아간다.
+    // 판매는 원가의 일부만 돌려주고(즉흥 리셋 방지), 이동은 무료로 둔다.
+    // 되돌리는 비용이 크면 '유도당함'이 그대로 남기 때문.
+    //
+    // ※ 판매해도 GameManager의 설치 카운터(builtByType)는 줄이지 않는다.
+    //   줄이면 "짓고 팔아서 가격 상승분을 되돌리기"가 최적 전략이 되어 가격 시스템이 무너진다.
+    public float sellRefundRatio = 0.65f;  // 실제 지불액의 이 비율만큼 환급
+    public bool allowMove = true;          // 이동 허용 (무료)
+
+    private Tower movingTower;             // 이동 중인 타워 (null이면 이동 모드 아님)
+    private Vector3 movingFrom;            // 이동 시작 위치 (취소 시 복귀)
+    private Rect towerPanelRect = new Rect(0, 0, 0, 0);  // 판매/이동 버튼 영역 (월드 클릭 가드)
+
     private bool previewing;
     private GameObject ghost;        // 반투명 타워 실루엣
     private int ghostTypeIndex = -1; // 지금 고스트가 어떤 종류인지 (도중에 숫자키로 바꿀 수 있음)
@@ -74,8 +92,22 @@ public class BuildManager : MonoBehaviour
 
         if (Mouse.current != null)
         {
-            // ── 미리보기 진행 중 ──
-            if (previewing)
+            // ── 타워 이동 모드 ──
+            // 설치 미리보기(누른 채 끌기)와 달리 '클릭해서 놓기'다.
+            // 이동은 GUI 버튼으로 시작하는데, 버튼은 마우스를 뗄 때 눌리므로
+            // 누른 채 끌기 방식이면 시작하자마자 취소돼 버린다.
+            if (movingTower != null)
+            {
+                if (Mouse.current.rightButton.wasPressedThisFrame) CancelMove();
+                else if (Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    Vector2 g = HudScaler.MouseToGui(Mouse.current.position.ReadValue());
+                    if (!upgradePanelRect.Contains(g) && !towerPanelRect.Contains(g)) ConfirmMove();
+                }
+                else UpdateMovePreview();
+            }
+            // ── 설치 미리보기 진행 중 ──
+            else if (previewing)
             {
                 if (Mouse.current.rightButton.wasPressedThisFrame)      CancelPreview();   // 우클릭 = 취소
                 else if (Mouse.current.leftButton.wasReleasedThisFrame) ConfirmPreview();  // 떼면 설치
@@ -88,13 +120,139 @@ public class BuildManager : MonoBehaviour
                 // GUI.matrix로 배율이 걸려 있으므로 마우스도 같은 좌표계로 변환해야
                 // 버튼 영역 판정이 어긋나지 않는다.
                 Vector2 gui = HudScaler.MouseToGui(Mouse.current.position.ReadValue());
-                if (!upgradePanelRect.Contains(gui)) OnPressWorld();
+                if (!upgradePanelRect.Contains(gui) && !towerPanelRect.Contains(gui)) OnPressWorld();
             }
         }
 
         // 선택했던 타워가 사라졌으면(스테이지 리셋·파괴 등) 사거리 표시 끄기
-        if (!previewing && rangeCircle != null && rangeCircle.enabled && selectedTower == null)
+        if (!previewing && movingTower == null && rangeCircle != null && rangeCircle.enabled && selectedTower == null)
             rangeCircle.enabled = false;
+    }
+
+    // ── 판매 ────────────────────────────────────────────────
+    int SellRefund(Tower t)
+    {
+        if (t == null) return 0;
+        int basis = (t.paidCost > 0) ? t.paidCost : t.cost; // 봇/배치AI가 지은 타워는 paidCost가 비어 있을 수 있다
+        return Mathf.Max(0, Mathf.RoundToInt(basis * Mathf.Clamp01(sellRefundRatio)));
+    }
+
+    void SellSelected()
+    {
+        Tower t = selectedTower;
+        if (t == null) return;
+
+        int refund = SellRefund(t);
+        Tile tile = FindTileAt(t.transform.position);
+        if (tile != null) tile.occupied = false;
+        if (GameManager.Instance != null) GameManager.Instance.AddGold(refund);
+        Debug.Log($"[판매] {t.towerName} → +{refund}골드");
+
+        HideRange();
+        Destroy(t.gameObject);
+    }
+
+    // ── 이동 ────────────────────────────────────────────────
+    void BeginMoveSelected()
+    {
+        if (!allowMove || selectedTower == null) return;
+        movingTower = selectedTower;
+        movingFrom = movingTower.transform.position;
+
+        // 원래 칸을 먼저 비워 둔다 → 제자리에 다시 놓는 것(= 취소나 다름없음)도 허용된다
+        Tile from = FindTileAt(movingFrom);
+        if (from != null) from.occupied = false;
+
+        // 옮기는 동안에는 공격을 멈춘다. 안 그러면 전투 중에 타워를 끌고 다니며
+        // 적을 쫓는 조작이 가능해져서 '되돌리기 수단'이 아니라 새로운 지배 전략이 된다.
+        movingTower.enabled = false;
+        // 콜라이더도 꺼야 한다. 타워가 커서를 따라다니므로 켜 두면 레이캐스트가 항상 타워를 먼저 맞고
+        // 그 아래 타일을 영영 못 찾아서 '놓을 수 있는 칸'이 하나도 없게 된다.
+        SetCollidersEnabled(movingTower, false);
+
+        selectedTower = null;   // 패널은 닫고 사거리 원은 이동 미리보기가 이어받는다
+        UpdateMovePreview();
+    }
+
+    static void SetCollidersEnabled(Tower t, bool on)
+    {
+        if (t == null) return;
+        foreach (Collider c in t.GetComponentsInChildren<Collider>(true))
+            if (c != null) c.enabled = on;
+    }
+
+    void UpdateMovePreview()
+    {
+        if (movingTower == null) { HideRange(); return; }
+
+        Tile tile = TileUnderMouse(out Tower existing);
+        // 자기 자신 위에 있는 경우는 '빈 칸'으로 친다 (이미 occupied를 풀어놨다)
+        if (existing != null && existing != movingTower) tile = null;
+
+        previewTile = tile;
+        previewValid = (tile != null) && tile.CanBuild();
+
+        if (tile != null) movingTower.transform.position = tile.transform.position;
+
+        Color c = previewValid ? previewOkColor : previewBadColor;
+        c.a = 0.95f;
+        DrawCircle(movingTower.transform.position, Mathf.Max(0.1f, movingTower.AttackRange), c);
+    }
+
+    void ConfirmMove()
+    {
+        Tower t = movingTower;
+        if (t == null) { movingTower = null; HideRange(); return; }
+
+        if (previewValid && previewTile != null)
+        {
+            t.transform.position = previewTile.transform.position;
+            previewTile.occupied = true;
+        }
+        else
+        {
+            RestoreMovedTower(t);
+        }
+
+        t.enabled = true;
+        SetCollidersEnabled(t, true);
+        movingTower = null;
+        previewTile = null;
+        previewValid = false;
+        HideRange();
+    }
+
+    void CancelMove()
+    {
+        Tower t = movingTower;
+        if (t != null) { RestoreMovedTower(t); t.enabled = true; SetCollidersEnabled(t, true); }
+        movingTower = null;
+        previewTile = null;
+        previewValid = false;
+        HideRange();
+    }
+
+    void RestoreMovedTower(Tower t)
+    {
+        t.transform.position = movingFrom;
+        Tile back = FindTileAt(movingFrom);
+        if (back != null) back.occupied = true;
+    }
+
+    // 월드 좌표에서 가장 가까운 타일 (타워는 타일 중심에 정확히 놓이므로 거리 0에 가깝다)
+    Tile FindTileAt(Vector3 pos)
+    {
+        Tile best = null;
+        float bestDist = 0.45f;
+        foreach (Tile tl in Object.FindObjectsByType<Tile>(FindObjectsSortMode.None))
+        {
+            if (tl == null) continue;
+            Vector3 a = tl.transform.position; a.y = 0f;
+            Vector3 b = pos; b.y = 0f;
+            float d = Vector3.Distance(a, b);
+            if (d < bestDist) { bestDist = d; best = tl; }
+        }
+        return best;
     }
 
     void SelectTower(int i)
@@ -201,9 +359,12 @@ public class BuildManager : MonoBehaviour
             GameManager.Instance.RegisterTowerBuilt(builtName);
         }
 
+        Tower built = go.GetComponent<Tower>();
+        if (built != null) built.paidCost = cost;   // 판매 환급의 기준 (오른 가격을 그대로 기억)
+
         // 이미 강화된 종류면 새 타워도 즉시 그 레벨로
         if (TowerUpgradeManager.Instance != null)
-            TowerUpgradeManager.Instance.ApplyCurrentLevel(go.GetComponent<Tower>());
+            TowerUpgradeManager.Instance.ApplyCurrentLevel(built);
     }
 
     void CancelPreview() { EndPreview(); }
@@ -395,5 +556,35 @@ public class BuildManager : MonoBehaviour
 
         // 이 영역 안의 클릭은 월드 설치로 넘어가지 않게 기록
         upgradePanelRect = new Rect(12, panelTop, 300, Mathf.Max(0, rows * 28f));
+
+        // ── 선택한 타워: 판매 / 이동 ───────────────────────────
+        if (movingTower != null)
+        {
+            y += 10f;
+            GUIStyle hint = new GUIStyle { fontSize = 17 };
+            hint.normal.textColor = new Color(0.4f, 1f, 0.5f);
+            GUI.Label(new Rect(12, y, 560, 24),
+                      $"이동 중: {movingTower.towerName} — 놓을 칸을 좌클릭 · 우클릭 취소", hint);
+            towerPanelRect = new Rect(0, 0, 0, 0);
+        }
+        else if (selectedTower != null)
+        {
+            y += 10f;
+            int lv = (mgr != null) ? mgr.GetLevel(selectedTower.towerName) : 0;
+            GUI.Label(new Rect(12, y, 560, 24), $"선택한 타워: {selectedTower.towerName} Lv{lv}", header);
+            y += 26f;
+
+            float top2 = y;
+            if (GUI.Button(new Rect(12, y, 145, 26), $"판매 +{SellRefund(selectedTower)}골드"))
+                SellSelected();
+            if (allowMove && GUI.Button(new Rect(165, y, 145, 26), "이동 (무료)"))
+                BeginMoveSelected();
+
+            towerPanelRect = new Rect(12, top2, 300, 28f);
+        }
+        else
+        {
+            towerPanelRect = new Rect(0, 0, 0, 0);
+        }
     }
 }

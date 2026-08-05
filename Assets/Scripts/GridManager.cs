@@ -7,8 +7,8 @@ using UnityEngine;
 public class GridManager : MonoBehaviour
 {
     [Header("그리드 크기")]
-    public int width = 10;
-    public int height = 8;
+    public int width = 16;
+    public int height = 12;
     public float tileSize = 1f;
 
     [Header("색상")]
@@ -20,6 +20,14 @@ public class GridManager : MonoBehaviour
     // 실측(dda_v5 로그): 경로 20~29칸 맵의 S2 클리어율 26% vs 80~89칸 맵 85%.
     //                   라운드당 손실도 0.152 vs 0.047로 3.2배 차이.
     // 즉 난이도 평균이 아니라 **맵 변동성**이 클리어 가능 여부를 지배하고 있었다.
+    //
+    // 2026-08-04 — 맵 20×16(320칸) → 16×12(192칸)로 줄이면서도 **45를 그대로 둔다.**
+    // 시뮬(3000회 생성)로 확인한 것:
+    //   · 16×12에서도 45칸 경로는 1회 시도당 25% 확률로 나온다 → 60회 재시도 안에 실패할 확률 3e-8. 안전.
+    //   · 45를 유지하면 경로 평균 54.8 → 49.0칸, 타워 4개 최적배치 커버리지 77% → 84%.
+    //     둘을 곱한 '실효 노출량'(적이 사격받는 총 거리)은 41.9 → 41.0으로 **-2%**, 사실상 난이도 중립이다.
+    //     → Difficulty_v11 의 보정이 그대로 살아 있다. (하한을 36까지 낮추면 -9%로 눈에 띄게 쉬워진다)
+    //   · 덤: 경로 길이 분포가 45~108 → 45~61로 좁아진다. 위에 적은 '맵 변동성' 문제도 같이 줄어든다.
     public int minPathLength = 45;         // 이 길이 미만이면 경로를 다시 뽑는다
     public float straightLaneChance = 0f;  // 레인 1줄짜리 단조로운 경로가 나올 확률 (0 = 안 나옴)
 

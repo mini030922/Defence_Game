@@ -9,9 +9,9 @@ REM  If the PC crashes, just run this file again.
 REM  Requires: Unity closed, Builds\Defence_Game.exe rebuilt.
 REM ===========================================================
 
-set RUN=dda_v11
-set YAML=difficulty.yaml
-set BRAIN=Difficulty
+set RUN=plc_v13
+set YAML=placement.yaml
+set BRAIN=Placement
 set ENVS=6
 set TS=20
 
