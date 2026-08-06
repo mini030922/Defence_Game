@@ -33297,17 +33297,17 @@ MonoBehaviour:
   roundHealthBase: 10
   roundHealthGrowth: 2
   keepUpgradesAcrossStages: 1
-  upgradeSeedScale: 1
+  upgradeSeedScale: 0
   randomizeStageForTraining: 0
   maxStageForTraining: 10
   advanceStageOnClear: 1
   showEnemyHealthBars: 1
   showSplashEffects: 1
   randomizePlayerPower: 0
-  playerPowerScale: 0.7
+  playerPowerScale: 1
   playerPowerMin: 1
   playerPowerMax: 1
-  usePlacementAgent: 0
+  usePlacementAgent: 1
   allowBuildDuringCombat: 1
   combatDecisionInterval: 1.5
   maxActionsPerCombatTick: 2

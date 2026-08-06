@@ -196,6 +196,25 @@ public class RoundManager : MonoBehaviour
     public bool allowSpeedControl = true;  // 배속 버튼
     public float[] speedOptions = new float[] { 1f, 2f, 3f };
 
+    [Header("연속 런 학습 (2026-08-05 신설) — 강화 시드 폐기")]
+    // 왜 바꾸나: plc_v13 로그에서 시드표가 정책을 지배하고 있다는 게 드러났다.
+    //   · 일반 타워의 '시드 레벨'과 '실제로 지은 개수'의 상관계수 r = +0.995 (속사는 −0.930)
+    //   · 실제로 산 강화 레벨: S1 1.84 → S5 1.95 → S6 0.63 → S10 0.03 (후반엔 사실상 0)
+    //   · 시드가 0인 유일한 스테이지 S1에서 AI의 자유 선택은 속사 3.58개 / 일반 0.25개인데,
+    //     시드가 일반·폭탄을 Lv4.25로 채워주는 S10에서는 일반 3.89 / 속사 0.00으로 완전히 뒤집힌다.
+    // 즉 배치 AI는 타워를 '고르는' 게 아니라 **시드표가 강화해 준 종류를 따라 짓고** 있었다.
+    // 게다가 시드표는 예전 세대의 구매량을 역산한 것이라 자기실현적 예언이 됐고,
+    // 이번 세대 구매량이 0이라 '고정점 반복'을 하면 표가 0으로 붕괴한다 — 측정 방법 자체가 깨졌다.
+    //
+    // 해법: 시드를 없애고 **사람과 똑같이 S1부터 연속으로 진행**시킨다.
+    //   강화 레벨은 오직 '직접 산 것'만 남으므로 편향이 원천적으로 사라진다.
+    // 대가: 후반 스테이지 표본이 줄어든다. S10 도달 확률이 약 5%라 균등 무작위 대비 약 1/10.
+    //   (그래서 이번 런은 탐색용으로 max_steps를 4M으로 줄여서 방향만 먼저 확인한다)
+    //
+    // 죽으면 S1부터 다시 시작하는 로그라이크 방식 — 강화도 전부 잃는다.
+    // 이러면 에피소드 = '한 판의 런'이 되어 크레딧 할당이 깔끔하다.
+    public bool continuousRunTraining = true;
+
     [Header("최적 배치 AI")]
     public bool usePlacementAgent = false; // true면 정비 단계에 봇 대신 PlacementAgent가 타워 배치
 
@@ -513,15 +532,36 @@ public class RoundManager : MonoBehaviour
             float hp = (GameManager.Instance != null) ? GameManager.Instance.HealthRatio() : 0f;
             agent.GradeStageEnd(true, roundsPerStage, roundsPerStage, hp);
         }
+        // 연속 런에서는 여기서 '런의 마지막 스테이지였는지'를 먼저 판정해야 한다.
+        // (아래에서 stage를 올려버리면 판정이 어긋난다)
+        bool runFinished = !ContinuousRun || GameManager.stage >= maxStageForTraining;
+
         if (advanceStageOnClear)
-            GameManager.stage = Mathf.Max(1, GameManager.stage + 1); // 플레이용 진행
+            GameManager.stage = Mathf.Max(1, GameManager.stage + 1); // 플레이용/연속런 진행
         yield return new WaitForSeconds(1.5f); // 결과 잠깐 표시
+
         if (usePlacementAgent && placementAgent != null)
         {
             placementAgent.StageClearBonus();
-            placementAgent.EndEpisode();
+            // 연속 런: 아직 마지막 스테이지가 아니면 배치 AI의 에피소드를 '이어간다'.
+            // DDA는 스테이지마다 반드시 끊어야 한다 — 강도·체력 배율이 에피소드 내 단조 증가라
+            // 이어붙이면 S1의 강도를 그대로 들고 S2로 넘어가 난이도 곡선이 무너진다.
+            if (runFinished) { StartNewRun(); placementAgent.EndEpisode(); }
         }
-        if (agent != null) agent.EndEpisode();  // → 다음 에피소드 자동 시작
+        if (agent != null) agent.EndEpisode();  // → 다음 에피소드(=다음 스테이지) 자동 시작
+    }
+
+    // 연속 런 모드인가 (학습에서 배치 AI를 쓸 때만 의미가 있다)
+    private bool ContinuousRun => continuousRunTraining && usePlacementAgent && !randomizeStageForTraining;
+
+    // 런이 끝났다(클리어 완주 또는 사망) → 다음 런은 S1 Lv0에서 시작한다.
+    // stage를 1로 되돌려 두면 다음 ResetStage()에서 keep=false가 되어
+    // TowerUpgradeManager.ResetLevels()가 자동으로 불린다(= 강화 전부 소실, 로그라이크).
+    // ※ 반드시 EndEpisode() '전에' 불러야 한다. EndEpisode는 OnEpisodeBegin을 동기로 호출하고,
+    //   그 안에서 곧바로 StartEpisode() → ResetStage()가 돌기 때문.
+    void StartNewRun()
+    {
+        GameManager.stage = 1;
     }
 
     // 전투 중 배치: 일정 간격으로 배치 AI에게 "지금 더 지을래?"를 묻는다.
@@ -584,6 +624,7 @@ public class RoundManager : MonoBehaviour
         if (usePlacementAgent && placementAgent != null)
         {
             placementAgent.GradeDied();
+            if (ContinuousRun) StartNewRun();   // 로그라이크: 죽으면 강화까지 전부 잃고 S1부터
             placementAgent.EndEpisode();
         }
         if (agent != null)
