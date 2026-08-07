@@ -1,0 +1,378 @@
+fileFormatVersion: 2
+guid: 825bfac1a539ef94486d8a14791cebd1
+ModelImporter:
+  serializedVersion: 21300
+  internalIDToNameTable: []
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Asteroid_Brown
+    second: {fileID: 2100000, guid: 2520750b1d5a40e45aab2cc9616e305b, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Asteroid_Gray
+    second: {fileID: 2100000, guid: 4c35f96689c060c44bebdd1e8f451c44, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Asteroid_White
+    second: {fileID: 2100000, guid: 9abb100edc74ffa4db1039dcf107b9c8, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: FrostStarGreenMoon
+    second: {fileID: 2100000, guid: b89188250121104419eab51773805eca, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Ovni_Green
+    second: {fileID: 2100000, guid: cefd754fb72fb544cafc7ea57d209de9, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Ovni_Orange
+    second: {fileID: 2100000, guid: 33bc43b0aa13ab144ad94ae9e2e4775e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Ovni_Pink
+    second: {fileID: 2100000, guid: 078613da7d6c0534aa5b0df8317a9b9a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_A
+    second: {fileID: 2100000, guid: 7eba4a811331c7c4f970023e19f3af87, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_B
+    second: {fileID: 2100000, guid: 8ed8ae60abd654047935895faf96f10e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_C
+    second: {fileID: 2100000, guid: 5059c4dbbffecd444a28404807eead45, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_D
+    second: {fileID: 2100000, guid: 87ec2b00e58a1d649bb6665b6b937dbe, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_E
+    second: {fileID: 2100000, guid: b76275b299f9b8740a53dc7718ba1f4a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_F
+    second: {fileID: 2100000, guid: 40ed1a860c47be8498e4f88eeab002d6, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_G
+    second: {fileID: 2100000, guid: 0ec2f1bf165788f4297aff75a9ed6de7, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_H
+    second: {fileID: 2100000, guid: 2ced33acca5a6d94ea9bea210f7208dc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_I
+    second: {fileID: 2100000, guid: ce23ffa2638e5674280b3d69dbbd3cd2, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_J
+    second: {fileID: 2100000, guid: daba25e98e0045344992f701b0baece1, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_K
+    second: {fileID: 2100000, guid: c5022daaa84a5b943a1808d8a505a6f8, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_L
+    second: {fileID: 2100000, guid: 77066e84ee6ab2f4684fbb9a99f31906, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_M
+    second: {fileID: 2100000, guid: 1ab673bee2c73874d875c932bb7588a6, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_N
+    second: {fileID: 2100000, guid: ad6bad51f74c07f40809609d3cd484bd, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_O
+    second: {fileID: 2100000, guid: 05c5b2ccf1d324044acb4cddd6c55606, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_P
+    second: {fileID: 2100000, guid: 9a5d0d1d216e61e40a4fb92133d5ae1d, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_Q
+    second: {fileID: 2100000, guid: fcc00375f5cf2114a86fe2566c217ca7, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlanetPack_R
+    second: {fileID: 2100000, guid: 6a9754b98283523499701ea723701400, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Rockets_Color1
+    second: {fileID: 2100000, guid: 36e2584cee9d4b744afb87551b2b4e4c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Rockets_Color2
+    second: {fileID: 2100000, guid: f57ab72e9d8a01b4d9a39f68cfbd2447, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Rockets_Color3
+    second: {fileID: 2100000, guid: 31f7d065470946c4eb0b674c8c46ef17, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Satellites_SAT7_PIU3
+    second: {fileID: 2100000, guid: a94fc977ef357bf42b1689b8dade0315, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Satellites_SAT8_PIU4
+    second: {fileID: 2100000, guid: 7242b8e6681e0e444a2abea10942f24e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Satellites_SAT9_PIU5
+    second: {fileID: 2100000, guid: 8af99cec68a9099458fb544a1be2d49c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spacehip_F230
+    second: {fileID: 2100000, guid: daf1c13350f6f514da28bdbb07310b22, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spacehip_F231
+    second: {fileID: 2100000, guid: beacc7a2b4cd5784cb69b8ba30a62f84, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Combat_D21_Q14
+    second: {fileID: 2100000, guid: 60116583c7d2d5c4dafff1eaaf1a0846, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Combat_D22_Q15
+    second: {fileID: 2100000, guid: db941c88c131d944daaaec9c16e3a551, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Combat_D23_Q16
+    second: {fileID: 2100000, guid: 9b79f0c493928d044bf0f54df748949f, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Combat_OT1_C12
+    second: {fileID: 2100000, guid: 5267e1986eda856428f503c763802784, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Combat_OT2_C13
+    second: {fileID: 2100000, guid: a4c9f1a378136bc41ac9fa8b8dc34e9c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Combat_OT3_C14
+    second: {fileID: 2100000, guid: 54c8ffc7989aa424f867c895c8557d93, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_A04
+    second: {fileID: 2100000, guid: 92b334795106ae74c8eac1b96247f78e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_A05
+    second: {fileID: 2100000, guid: ab246c00384fb0d4086ed7ace0bd6063, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_A06
+    second: {fileID: 2100000, guid: 6ef3b5478c9836b469596b910c242a42, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_A07
+    second: {fileID: 2100000, guid: eeb2ff3cffdfb8f4aa5705cf520e93ee, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_F016
+    second: {fileID: 2100000, guid: 2ed4e8b13cb66244dbaedcbcb80b3437, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_F017
+    second: {fileID: 2100000, guid: 35964323df06b2d4ab7779b05dd4af1a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_F018
+    second: {fileID: 2100000, guid: df900e9cb1e094d469af8dcb36d54c31, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_F019
+    second: {fileID: 2100000, guid: 708dc83c3cf65d6479e4be9953a19af3, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_RB37
+    second: {fileID: 2100000, guid: 2f7ac5b3f13bdb34b837221f2133f4d1, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_RB38
+    second: {fileID: 2100000, guid: 657382881d9933b4f9860725412ae8b8, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_RB39
+    second: {fileID: 2100000, guid: 91e16ddd1aabf824e9d742a77ce85962, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Hero_RB40
+    second: {fileID: 2100000, guid: 6401ad2d81f803b4fa3c63944cfab15c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Spaceship_Omega
+    second: {fileID: 2100000, guid: a1dab214a597ce24a8b9d0f0e7ed97c8, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: SunAndMoon
+    second: {fileID: 2100000, guid: 6f187fec721db9643be20fff18b9580c, type: 2}
+  materials:
+    materialImportMode: 2
+    materialName: 0
+    materialSearch: 1
+    materialLocation: 1
+  animations:
+    legacyGenerateAnimations: 4
+    bakeSimulation: 0
+    resampleCurves: 1
+    optimizeGameObjects: 0
+    removeConstantScaleCurves: 1
+    motionNodeName: 
+    rigImportErrors: 
+    rigImportWarnings: 
+    animationImportErrors: 
+    animationImportWarnings: 
+    animationRetargetingWarnings: 
+    animationDoRetargetingWarnings: 0
+    importAnimatedCustomProperties: 0
+    importConstraints: 0
+    animationCompression: 1
+    animationRotationError: 0.5
+    animationPositionError: 0.5
+    animationScaleError: 0.5
+    animationWrapMode: 0
+    extraExposedTransformPaths: []
+    extraUserProperties: []
+    clipAnimations: []
+    isReadable: 0
+  meshes:
+    lODScreenPercentages: []
+    globalScale: 1
+    meshCompression: 0
+    addColliders: 0
+    useSRGBMaterialColor: 1
+    sortHierarchyByName: 1
+    importVisibility: 1
+    importBlendShapes: 1
+    importCameras: 1
+    importLights: 1
+    nodeNameCollisionStrategy: 1
+    fileIdsGeneration: 2
+    swapUVChannels: 0
+    generateSecondaryUV: 0
+    useFileUnits: 1
+    keepQuads: 0
+    weldVertices: 1
+    bakeAxisConversion: 0
+    preserveHierarchy: 0
+    skinWeightsMode: 0
+    maxBonesPerVertex: 4
+    minBoneWeight: 0.001
+    optimizeBones: 1
+    meshOptimizationFlags: -1
+    indexFormat: 0
+    secondaryUVAngleDistortion: 8
+    secondaryUVAreaDistortion: 15.000001
+    secondaryUVHardAngle: 88
+    secondaryUVMarginMethod: 1
+    secondaryUVMinLightmapResolution: 40
+    secondaryUVMinObjectScale: 1
+    secondaryUVPackMargin: 4
+    useFileScale: 1
+  tangentSpace:
+    normalSmoothAngle: 60
+    normalImportMode: 0
+    tangentImportMode: 3
+    normalCalculationMode: 4
+    legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes: 0
+    blendShapeNormalImportMode: 1
+    normalSmoothingSource: 0
+  referencedClips: []
+  importAnimation: 1
+  humanDescription:
+    serializedVersion: 3
+    human: []
+    skeleton: []
+    armTwist: 0.5
+    foreArmTwist: 0.5
+    upperLegTwist: 0.5
+    legTwist: 0.5
+    armStretch: 0.05
+    legStretch: 0.05
+    feetSpacing: 0
+    globalScale: 1
+    rootMotionBoneName: 
+    hasTranslationDoF: 0
+    hasExtraRoot: 0
+    skeletonHasParents: 1
+  lastHumanDescriptionAvatarSource: {instanceID: 0}
+  autoGenerateAvatarMappingIfUnspecified: 1
+  animationType: 2
+  humanoidOversampling: 1
+  avatarSetup: 0
+  addHumanoidExtraRootOnlyWhenUsingAvatar: 1
+  remapMaterialsIfMaterialImportModeIsNone: 0
+  additionalBone: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 326777
+  packageName: Super Magic FX - 1700+ Unique VFX!
+  packageVersion: 1.2.0
+  assetPath: Assets/Piloto Studio/Environment/StylizedGalaxyPack/Planets/Models/Planet_GravityRocks_Gray.fbx
+  uploadId: 953290

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: a8af61b491a4bf646a4e4349a9deb11b
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 625f186215c104763be7675aa2d941aa, type: 3}
+AssetOrigin:
+  serializedVersion: 1
+  productId: 326777
+  packageName: Super Magic FX - 1700+ Unique VFX!
+  packageVersion: 1.2.0
+  assetPath: Assets/Piloto Studio/Shaders_Reforged/UberFXSG_Parallax.shadergraph
+  uploadId: 953290
