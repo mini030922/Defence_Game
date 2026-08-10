@@ -41,6 +41,29 @@ public class Enemy : MonoBehaviour
     private static Material barBgMat;
     private static Material barFillMat;
 
+    // ── 모델 프리팹 지원 (2026-08-08 신설) ────────────────────────────────
+    // 적이 캡슐 프리미티브에서 실제 모델 프리팹으로 바뀌면서 생긴 세 가지 차이를 흡수한다.
+    //
+    //  (1) 피벗 위치: 캡슐은 몸통 '중심'이 피벗이지만 캐릭터 모델은 보통 '발바닥'이 피벗이다.
+    //      그대로 두면 투사체가 적의 발밑을 향해 날아가 바닥을 긁는 것처럼 보인다.
+    //      → AimPoint(몸통 중앙)를 따로 노출해 타워가 그쪽을 겨냥하게 한다.
+    //  (2) 키: 캡슐은 반높이가 항상 1.0이라 체력바 위치를 상수로 둘 수 있었지만
+    //      모델은 제각각이다. → 렌더러 경계에서 실제 꼭대기를 재서 올린다.
+    //  (3) 애니메이션: Run 클립이 도는데 이동 속도와 무관하게 같은 배속으로 돌면
+    //      빠른 적은 미끄러지듯, 감속된 적은 발을 헛도는 것처럼 보인다. → 속도에 비례시킨다.
+
+    // 투사체가 겨냥할 지점 = 발밑이 아니라 몸통 중앙.
+    // 캡슐(기존)은 aimHeight가 0으로 계산되어 예전과 완전히 같은 동작이 된다.
+    [System.NonSerialized] public float aimHeight = 0f;
+    public Vector3 AimPoint => transform.position + Vector3.up * aimHeight;
+
+    [Header("모델 프리팹용")]
+    public bool faceMovement = true;   // 진행 방향을 바라보게 회전 (캡슐은 티가 안 나므로 무해)
+    public float turnSpeed = 12f;      // 회전 보간 속도
+    public float animSpeedRef = 2f;    // 이 이동 속도일 때 애니메이션 배속 1.0
+
+    private Animator anim;
+
     // 외부(스포너/게임매니저)에서 결과를 받기 위한 콜백
     public System.Action<Enemy> onReachedEnd; // 골 도달
     public System.Action<Enemy> onDied;        // 사망
@@ -55,7 +78,39 @@ public class Enemy : MonoBehaviour
         moveSpeed = speed;
         baseMoveSpeed = speed;
         targetIndex = 0;
+
+        // 겨냥 지점과 애니메이터는 체력바보다 먼저 잡아야 한다.
+        // (체력바 자식이 생기고 나면 렌더러 경계에 막대까지 섞여 들어간다)
+        aimHeight = MeasureLocal(bounds => bounds.center.y);
+        anim = GetComponentInChildren<Animator>();
+        SyncAnimSpeed();
+
         if (showHealthBars) BuildHealthBar();
+    }
+
+    // 이 오브젝트의 렌더러들을 합친 경계에서 원하는 높이를 재어 '피벗 기준 상대 높이'로 돌려준다.
+    // 렌더러가 없으면(파괴 직전 등) 0 → 예전 캡슐과 같은 동작.
+    // ※ 캡슐 프리미티브는 피벗이 몸통 중앙이므로 center.y - position.y ≈ 0 이 나온다.
+    float MeasureLocal(System.Func<Bounds, float> pick)
+    {
+        Renderer[] rs = GetComponentsInChildren<Renderer>();
+        Bounds b = default;
+        bool any = false;
+        foreach (Renderer r in rs)
+        {
+            if (r == null) continue;
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        if (!any) return 0f;
+        return pick(b) - transform.position.y;
+    }
+
+    // 애니메이션 배속을 현재 이동 속도에 맞춘다 (감속되면 같이 느려진다).
+    void SyncAnimSpeed()
+    {
+        if (anim == null) return;
+        anim.speed = Mathf.Clamp(moveSpeed / Mathf.Max(0.01f, animSpeedRef), 0.05f, 4f);
     }
 
     void BuildHealthBar()
@@ -65,12 +120,14 @@ public class Enemy : MonoBehaviour
         // 공용 머티리얼 (적마다 새로 만들면 드로우콜·GC가 터진다)
         if (barBgMat == null)
         {
-            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sh == null) sh = Shader.Find("Unlit/Color");
-            if (sh == null) sh = Shader.Find("Sprites/Default");
-            barBgMat = new Material(sh);   barBgMat.color = new Color(0.05f, 0.05f, 0.05f, 1f);
-            barFillMat = new Material(sh); barFillMat.color = Color.green;
-            SetMatColor(barBgMat, new Color(0.05f, 0.05f, 0.05f, 1f));
+            // ⚠️ 여기서 Shader.Find 를 직접 부르면 빌드에서 체력바가 새까맣게 나온다.
+            //    이유와 대책은 RuntimeShaders.cs 주석 참고.
+            Shader sh = RuntimeShaders.Unlit;
+            if (sh == null) return;                    // 셰이더가 없으면 아예 안 만든다 (검은 막대보다 낫다)
+            barBgMat = new Material(sh);
+            barFillMat = new Material(sh);
+            RuntimeShaders.SetColor(barBgMat, new Color(0.05f, 0.05f, 0.05f, 1f));
+            RuntimeShaders.SetColor(barFillMat, Color.green);
         }
 
         GameObject root = new GameObject("HPBar");
@@ -83,9 +140,12 @@ public class Enemy : MonoBehaviour
         float s = Mathf.Max(0.01f, transform.localScale.y);
         barRoot.localScale = Vector3.one / s;
 
-        // 캡슐 프리미티브는 기본 높이가 2 → 반높이 = 스케일 × 1.0.
-        // 그 위로 여유를 두지 않으면 체력바가 몸통에 파묻힌다.
-        barRoot.localPosition = new Vector3(0f, 1f + barHeadMargin / s, 0f);
+        // 머리 꼭대기 높이. 예전에는 캡슐 전용 상수(반높이 = 1.0)를 그대로 썼지만,
+        // 모델 프리팹은 키가 제각각이라 렌더러 경계에서 실측한다.
+        // (체력바 자식을 만들기 '전'에 재야 막대 자신이 경계에 섞이지 않는다)
+        float topLocal = MeasureLocal(b => b.max.y);
+        if (topLocal <= 0.001f) topLocal = s;      // 렌더러를 못 찾으면 캡슐 기준으로 되돌린다
+        barRoot.localPosition = new Vector3(0f, topLocal / s + barHeadMargin / s, 0f);
 
         // 배경 (검정)
         GameObject bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
@@ -146,12 +206,24 @@ public class Enemy : MonoBehaviour
         if (slowTimer > 0f)
         {
             slowTimer -= Time.deltaTime;
-            if (slowTimer <= 0f) { slowFactor = 1f; moveSpeed = baseMoveSpeed; }
+            if (slowTimer <= 0f) { slowFactor = 1f; moveSpeed = baseMoveSpeed; SyncAnimSpeed(); }
         }
 
         // 다음 경로 지점으로 이동 (높이는 현재 높이 유지)
         Vector3 t = path[targetIndex];
         Vector3 targetPos = new Vector3(t.x, transform.position.y, t.z);
+
+        // 진행 방향 바라보기 — 모델이 옆·뒤를 보고 달리지 않게. (이동보다 먼저 돌려야 덜 뻣뻣하다)
+        if (faceMovement)
+        {
+            Vector3 dir = targetPos - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.0001f)
+                transform.rotation = Quaternion.Slerp(transform.rotation,
+                                                      Quaternion.LookRotation(dir),
+                                                      Mathf.Clamp01(turnSpeed * Time.deltaTime));
+        }
+
         transform.position = Vector3.MoveTowards(transform.position, targetPos, moveSpeed * Time.deltaTime);
 
         // 지점에 도착하면 다음 지점으로
@@ -188,6 +260,7 @@ public class Enemy : MonoBehaviour
         slowFactor = factor;
         slowTimer = duration;
         moveSpeed = baseMoveSpeed * slowFactor;
+        SyncAnimSpeed();   // 느려진 만큼 달리기 모션도 느려진다
     }
 
     void ReachEnd()

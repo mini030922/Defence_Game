@@ -121,6 +121,9 @@ public class GameManager : MonoBehaviour
     // 임시 화면 표시 (나중에 제대로 된 UI 캔버스로 교체)
     void OnGUI()
     {
+        // GameUI(Canvas)가 살아 있으면 옛 OnGUI HUD는 그리지 않는다.
+        // 씬에서 GameUI 오브젝트를 지우면 자동으로 이 HUD가 다시 나온다 — 되돌리기가 쉽다.
+        if (!GameUI.LegacyHudEnabled) return;
         HudScaler.Begin();   // 해상도와 무관하게 같은 비율로 그린다
         GUIStyle style = new GUIStyle { fontSize = 20 };
         style.normal.textColor = Color.white;

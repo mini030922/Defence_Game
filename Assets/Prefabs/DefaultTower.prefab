@@ -47,11 +47,41 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Tower
   towerName: Default
   targetArea: 0
+  targetHighestHealth: 0
   shootingSpeed: 1
   damage: 4
   minRange: 0
   maxRange: 3
   cost: 50
+  rangeBonus: 0.5
+  coverageRangeCap: 8
+  splashRadius: 1.5
+  impactEffect:
+    prefab: {fileID: 0}
+    scale: 1
+    scaleWithSplash: 1
+    eulerOffset: {x: 0, y: 0, z: 0}
+    yOffset: 0
+    life: 0
+    alsoShowRangeDisc: 0
+  slowFactor: 1
+  slowDuration: 2.5
+  projectileSpeedFactor: 6
+  minProjectileSpeed: 4
+  projectileColor: {r: 0.1, g: 0.1, b: 0.12, a: 1}
+  upgradeLevel: 0
+  damageUpPerLevel: 0.142
+  rateUpPerLevel: 0.113
+  forceRateUpgrade: 0
+  weaponPivot: {fileID: 0}
+  weaponYawOffset: 0
+  turnSpeed: 540
+  aimTolerance: 12
+  maxAimWait: 0.25
+  skipAimBelowInterval: 0.35
+  retargetInterval: 0.15
+  upgradeParts: []
+  weaponLiftPerPart: 0
 --- !u!1 &7642149957922562622
 GameObject:
   m_ObjectHideFlags: 0
@@ -61,7 +91,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 9138856786510853160}
-  - component: {fileID: 5027178404565173963}
   - component: {fileID: 5855040630546576026}
   - component: {fileID: 4977949263317468428}
   m_Layer: 0
@@ -86,14 +115,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 2251631231207654258}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!33 &5027178404565173963
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7642149957922562622}
-  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
 --- !u!23 &5855040630546576026
 MeshRenderer:
   m_ObjectHideFlags: 0

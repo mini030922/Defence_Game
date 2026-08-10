@@ -33243,7 +33243,43 @@ MonoBehaviour:
   agent: {fileID: 0}
   bot: {fileID: 0}
   placementAgent: {fileID: 0}
-  enemyTypes: []
+  enemyTypes:
+  - typeName: Enemy_None
+    healthMultiplier: 0
+    speedMultiplier: 0
+    scale: 0
+    color: {r: 0, g: 0, b: 0, a: 0}
+    cost: 0
+    leakDamageFraction: 0
+    roundHealthGrowth: 0
+    prefab: {fileID: 3230221668012394425, guid: f9bb57df1fc227e4496929936c4cd894, type: 3}
+    modelScale: 0
+    modelYOffset: 0
+    tintWithColor: 0
+  - typeName: Enemy_Smile
+    healthMultiplier: 0
+    speedMultiplier: 0
+    scale: 0
+    color: {r: 0, g: 0, b: 0, a: 0}
+    cost: 0
+    leakDamageFraction: 0
+    roundHealthGrowth: 0
+    prefab: {fileID: 8453236299489280686, guid: 11a24c1db9a77d442922f013573e1233, type: 3}
+    modelScale: 0
+    modelYOffset: 0
+    tintWithColor: 0
+  - typeName: Enemy_Cry
+    healthMultiplier: 0
+    speedMultiplier: 0
+    scale: 0
+    color: {r: 0, g: 0, b: 0, a: 0}
+    cost: 0
+    leakDamageFraction: 0
+    roundHealthGrowth: 0
+    prefab: {fileID: 3567893143723589912, guid: 1c1b1a91853d60e4db7b9c764618d855, type: 3}
+    modelScale: 0
+    modelYOffset: 0
+    tintWithColor: 0
   killRewardBase: 5
   killRewardStageGrowth: 0.1
   roundGoldStart: 20
@@ -33254,6 +33290,8 @@ MonoBehaviour:
   prepTime: 4
   enemyHeight: 0.6
   randomizePathEachEpisode: 1
+  enemyGroundY: 0.1
+  useModelsInTraining: 0
   stageCountGrowth: 0.12
   stageHealthGrowth: 0.12
   roundBudgetBase: 4

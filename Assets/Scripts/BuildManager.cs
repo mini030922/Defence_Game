@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;   // 새 Input System
+using UnityEngine.EventSystems;  // uGUI 위 클릭 판정
 
 // 마우스로 타일을 클릭해 타워를 설치한다.
 // 여러 타워 종류를 숫자키(1~5)로 골라서 설치할 수 있다.
@@ -101,8 +102,7 @@ public class BuildManager : MonoBehaviour
                 if (Mouse.current.rightButton.wasPressedThisFrame) CancelMove();
                 else if (Mouse.current.leftButton.wasPressedThisFrame)
                 {
-                    Vector2 g = HudScaler.MouseToGui(Mouse.current.position.ReadValue());
-                    if (!upgradePanelRect.Contains(g) && !towerPanelRect.Contains(g)) ConfirmMove();
+                    if (!IsPointerOverUI()) ConfirmMove();
                 }
                 else UpdateMovePreview();
             }
@@ -117,10 +117,7 @@ public class BuildManager : MonoBehaviour
             // ── 새로 누름 ──
             else if (Mouse.current.leftButton.wasPressedThisFrame)
             {
-                // GUI.matrix로 배율이 걸려 있으므로 마우스도 같은 좌표계로 변환해야
-                // 버튼 영역 판정이 어긋나지 않는다.
-                Vector2 gui = HudScaler.MouseToGui(Mouse.current.position.ReadValue());
-                if (!upgradePanelRect.Contains(gui) && !towerPanelRect.Contains(gui)) OnPressWorld();
+                if (!IsPointerOverUI()) OnPressWorld();
             }
         }
 
@@ -128,6 +125,34 @@ public class BuildManager : MonoBehaviour
         if (!previewing && movingTower == null && rangeCircle != null && rangeCircle.enabled && selectedTower == null)
             rangeCircle.enabled = false;
     }
+
+    // ── UI 위 클릭 가드 (2026-08-09) ─────────────────────────────────────
+    // 버튼을 눌렀는데 그 아래 타일에 타워까지 지어지면 안 된다.
+    //  · uGUI(Canvas)  : EventSystem이 정확히 알려준다
+    //  · 옛 OnGUI HUD  : 예전처럼 버튼 Rect로 직접 판정 (GameUI를 지우면 이 경로로 돌아간다)
+    bool IsPointerOverUI()
+    {
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            return true;
+
+        if (GameUI.LegacyHudEnabled && Mouse.current != null)
+        {
+            // GUI.matrix로 배율이 걸려 있으므로 마우스도 같은 좌표계로 변환해야 영역 판정이 맞는다
+            Vector2 g = HudScaler.MouseToGui(Mouse.current.position.ReadValue());
+            if (upgradePanelRect.Contains(g) || towerPanelRect.Contains(g)) return true;
+        }
+        return false;
+    }
+
+    // ── GameUI 연동용 접근자 (2026-08-09) ────────────────────────────────
+    public int SelectedIndex => selectedIndex;
+    public Tower SelectedTower => selectedTower;
+    public Tower MovingTower => movingTower;
+    public void UiSelectTower(int i) => SelectTower(i);
+    public int UiSellRefund(Tower t) => SellRefund(t);
+    public void UiSell() => SellSelected();
+    public void UiBeginMove() => BeginMoveSelected();
+    public void UiUpgradeType(string nm) => TryUpgradeType(nm);
 
     // ── 판매 ────────────────────────────────────────────────
     int SellRefund(Tower t)
@@ -394,6 +419,8 @@ public class BuildManager : MonoBehaviour
         foreach (Collider c in ghost.GetComponentsInChildren<Collider>(true)) Destroy(c);
 
         EnsureGhostMat();
+        if (ghostMat == null) return;                  // 셰이더를 못 찾았으면 원래 색 그대로 둔다
+
         foreach (Renderer r in ghost.GetComponentsInChildren<Renderer>(true))
         {
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -419,9 +446,9 @@ public class BuildManager : MonoBehaviour
     static void EnsureGhostMat()
     {
         if (ghostMat != null) return;
-        Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-        if (sh == null) sh = Shader.Find("Sprites/Default");
-        if (sh == null) sh = Shader.Find("Unlit/Color");
+        // ⚠️ Shader.Find 직접 호출 금지 — RuntimeShaders.cs 주석 참고.
+        Shader sh = RuntimeShaders.Unlit;
+        if (sh == null) return;
         ghostMat = new Material(sh);
         if (ghostMat.HasProperty("_Surface"))
         {
@@ -458,6 +485,9 @@ public class BuildManager : MonoBehaviour
         rangeCircle.numCapVertices = 2;
         rangeCircle.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         rangeCircle.receiveShadows = false;
+        // 여기만 Sprites/Default 를 그대로 써도 된다.
+        // LineRenderer 는 메시를 스스로 만들면서 **정점 컬러를 채워 주기** 때문이다.
+        // (색 채널이 없는 Quad 프리미티브에서 검게 나오던 문제가 여기엔 없다)
         Shader sh = Shader.Find("Sprites/Default");
         if (sh != null) rangeCircle.material = new Material(sh);
         rangeCircle.startColor = rangeColor;
@@ -498,6 +528,9 @@ public class BuildManager : MonoBehaviour
     // 임시 화면 표시: 타워 목록 + 종류별 강화 버튼
     void OnGUI()
     {
+        // GameUI(Canvas)가 살아 있으면 옛 OnGUI HUD는 그리지 않는다.
+        // 씬에서 GameUI 오브젝트를 지우면 자동으로 이 HUD가 다시 나온다 — 되돌리기가 쉽다.
+        if (!GameUI.LegacyHudEnabled) return;
         HudScaler.Begin();
         if (towerPrefabs == null) return;
 

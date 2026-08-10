@@ -11,9 +11,57 @@ public class GridManager : MonoBehaviour
     public int height = 12;
     public float tileSize = 1f;
 
-    [Header("색상")]
+    [Header("색상 (타일 모델을 안 쓸 때만 사용)")]
     public Color buildableColor = new Color(0.35f, 0.65f, 0.35f);
     public Color pathColor = new Color(0.82f, 0.72f, 0.45f);
+
+    // ── 타일 모델 (2026-08-09 신설) ──────────────────────────────────────────
+    // 전부 비워두면 예전과 똑같이 '색칠한 큐브'가 나온다. 하나씩 꽂으며 점진적으로 교체할 수 있다.
+    //
+    // 경로가 에피소드마다 새로 생성되므로 맵을 손으로 배치할 수 없다.
+    // 대신 `pathCoords`가 **순서 있는 리스트**라는 점을 이용해, 각 칸의 앞뒤 좌표로
+    // 직선/코너/시작/끝을 판정하고 회전각까지 계산해서 코드로 조립한다.
+    [Header("타일 모델 — 비우면 기존 색칠 큐브")]
+    public GameObject buildablePrefab;      // 설치 가능 땅 (Kenney: tile)
+    public GameObject[] buildableVariants;  // 가끔 섞어 쓸 변형 (tile-dirt, tile-bump, tile-hill …)
+    [Range(0f, 1f)] public float variantChance = 0.25f;
+
+    public GameObject pathStraightPrefab;   // 직선 (tile-straight)
+    public GameObject pathCornerPrefab;     // 코너 (tile-corner-round / -square)
+    public GameObject pathStartPrefab;      // 적이 나오는 첫 칸 (tile-spawn)
+    public GameObject pathEndPrefab;        // 골 (tile-end)
+
+    // 모델 피벗이 밑면이면 -0.1.
+    // ⚠️ 타일 윗면은 반드시 y = 0.10에 와야 한다 — `RoundManager.enemyGroundY 0.1`,
+    //    `SplashEffect.groundY 0.16`, 타워 배치가 전부 이 값을 전제로 한다.
+    public float tileVisualYOffset = -0.1f;
+
+    // 겉모습 크기 배율. 1.0 = 칸을 꽉 채움(모듈러 타일의 정상 상태 — 길이 끊기지 않는다).
+    //   · 예전 색칠 큐브가 0.95였던 건 **평평한 단색을 칸으로 읽히게 하려고 일부러 준 틈**이다.
+    //     모델 타일은 모서리 굴곡이 이미 있어서 맞붙는 게 맞다.
+    //   · 인접 타일이 겹쳐 깜빡이면(z-fighting) 0.98쯤으로 살짝 줄인다.
+    //   · 틈이 있는 옛 느낌이 좋으면 0.95.
+    // ※ 클릭 판정용 BoxCollider는 이 값과 무관하게 항상 tileSize를 유지한다 —
+    //   겉모습을 줄여도 칸 사이에서 클릭이 새지 않는다.
+    [Range(0.5f, 1.2f)] public float tileVisualScale = 1f;
+
+    // 타워를 지으면 그 칸을 민짜 타일(buildablePrefab)로 즉시 바꾼다. 팔거나 옮기면 원래대로 돌아온다.
+    // 나무·바위가 올라간 변형 칸에 타워를 세우면 서로 뚫고 나오는데, 그걸 막는 가장 단순한 방법이다.
+    // (교체는 Tile.occupied 프로퍼티가 알아서 한다 — 건설·판매·이동 호출부는 손대지 않았다)
+    public bool swapTileOnBuild = true;
+
+    // 모델마다 '기본으로 바라보는 방향'이 달라서 90° 단위로 어긋날 수 있다.
+    // 눈으로 보고 0/90/180/270 중 맞는 값을 넣으면 그 종류 전체가 한 번에 맞춰진다.
+    // ⚠️ 시작과 끝은 **따로** 둔다 (2026-08-09 수정).
+    //    처음엔 하나로 묶었는데, 두 타일이 기준으로 삼는 방향이 서로 반대라서 같은 값으로는 못 맞춘다.
+    //      · 시작 칸: 길이 '나가는 쪽'(dirOut)으로 열려 있다
+    //      · 끝 칸  : 길이 '들어온 쪽'(-dirIn)으로 열려 있다
+    //    게다가 tile-spawn과 tile-end는 애초에 다른 모델이라 기본 방향도 다를 수 있다.
+    [Header("모델 기본 방향 보정 (90° 단위)")]
+    public float straightYawOffset = 0f;
+    public float cornerYawOffset = 0f;
+    public float startYawOffset = 0f;
+    public float endYawOffset = 0f;
 
     [Header("경로 길이 하한 (2026-07-28 추가)")]
     // 짧은 경로는 타워가 쏠 시간도, 한 타워가 덮을 구간도 적어 게임이 급격히 어려워진다.
@@ -71,11 +119,17 @@ public class GridManager : MonoBehaviour
             for (int y = 0; y < height; y++)
             {
                 Vector2Int coord = new Vector2Int(x, y);
-                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                go.name = $"Tile_{x}_{y}";
+
+                // 타일 루트는 '판정용 껍데기'다 — 렌더러가 없고 콜라이더만 있다.
+                // 겉모습은 Tile.SetVisual이 자식으로 붙인다(경로가 바뀌면 자식만 갈아끼우면 됨).
+                GameObject go = new GameObject($"Tile_{x}_{y}");
                 go.transform.SetParent(transform);
                 go.transform.position = GridToWorld(coord);
-                go.transform.localScale = new Vector3(tileSize * 0.95f, 0.2f, tileSize * 0.95f);
+
+                // 클릭 판정은 칸을 **꽉 채운다**(0.95가 아니라 tileSize).
+                // 예전엔 큐브가 곧 콜라이더라 칸 사이 5% 틈에서 클릭이 새고 있었다.
+                BoxCollider bc = go.AddComponent<BoxCollider>();
+                bc.size = new Vector3(tileSize, 0.2f, tileSize);
 
                 Tile tile = go.AddComponent<Tile>();
                 bool isPath = pathSet.Contains(coord);
@@ -84,6 +138,8 @@ public class GridManager : MonoBehaviour
                 tiles[x, y] = tile;
             }
         }
+
+        RefreshTileVisuals();
     }
 
     List<Vector2Int> EffectivePath()
@@ -99,6 +155,10 @@ public class GridManager : MonoBehaviour
     }
 
     // ── 런타임 경로 랜덤화 ──
+    // ContextMenu를 붙여둔 이유: 편집 모드의 기본 경로는 **가로 일직선**이라 코너가 한 번도 안 나온다.
+    // 코너 회전값을 맞추려면 Play를 눌러야 했는데, 그러면 반복이 너무 느리다.
+    // 이걸로 편집 모드에서 뱀형 경로를 뽑아놓고 오프셋을 조정하면 즉시 확인된다.
+    [ContextMenu("테스트용 무작위 경로 (Randomize Path)")]
     public void RandomizePath()
     {
         pathCoords = GenerateRandomPath();
@@ -119,6 +179,108 @@ public class GridManager : MonoBehaviour
                 t.occupied = false;
                 t.SetColor(isPath ? pathColor : buildableColor);
             }
+
+        // 경로가 바뀌었으니 어떤 칸이 길이고 어떤 칸이 땅인지도 바뀐다 → 모델을 다시 조립한다.
+        RefreshTileVisuals();
+    }
+
+    // ── 타일 겉모습 조립 (2026-08-09) ────────────────────────────────────────
+    // 에피소드마다 한 번(경로 재생성 시) 돈다. 192칸이라 비용은 무시할 만하다.
+    [ContextMenu("타일 모델 새로고침 (Refresh Tile Visuals)")]
+    public void RefreshTileVisuals()
+    {
+        if (tiles == null) return;
+
+        // 좌표 → 경로상의 순번. 앞뒤 칸을 알아야 직선/코너를 구분할 수 있다.
+        List<Vector2Int> path = EffectivePath();
+        Dictionary<Vector2Int, int> order = new Dictionary<Vector2Int, int>();
+        for (int i = 0; i < path.Count; i++) order[path[i]] = i;
+
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                Tile t = tiles[x, y];
+                if (t == null) continue;
+
+                GameObject prefab;
+                float yaw;
+                if (t.type == TileType.Path && order.TryGetValue(new Vector2Int(x, y), out int idx))
+                    PickPathVisual(path, idx, out prefab, out yaw);
+                else
+                    PickGroundVisual(out prefab, out yaw);
+
+                // 타워가 올라갔을 때 쓸 모델. 길 타일은 점유될 일이 없으므로 null.
+                GameObject occ = (swapTileOnBuild && t.type == TileType.Buildable)
+                                 ? buildablePrefab : null;
+
+                t.SetVisual(prefab, yaw, occ, tileVisualYOffset, tileSize * tileVisualScale);
+            }
+    }
+
+    void PickGroundVisual(out GameObject prefab, out float yaw)
+    {
+        prefab = buildablePrefab;
+        if (buildableVariants != null && buildableVariants.Length > 0 && Random.value < variantChance)
+        {
+            GameObject v = buildableVariants[Random.Range(0, buildableVariants.Length)];
+            if (v != null) prefab = v;
+        }
+        // 평평한 땅은 어느 쪽으로 돌려도 되므로 90°씩 무작위로 돌려 반복감을 줄인다.
+        yaw = Random.Range(0, 4) * 90f;
+    }
+
+    // 경로 i번째 칸이 직선인지 코너인지 시작/끝인지 판정하고, 모델과 회전각을 정한다.
+    void PickPathVisual(List<Vector2Int> path, int i, out GameObject prefab, out float yaw)
+    {
+        Vector2Int cur = path[i];
+        bool hasPrev = i > 0;
+        bool hasNext = i < path.Count - 1;
+        Vector2Int dirIn  = hasPrev ? cur - path[i - 1] : Vector2Int.zero;
+        Vector2Int dirOut = hasNext ? path[i + 1] - cur : Vector2Int.zero;
+
+        // 첫 칸 = 적이 나오는 곳, 마지막 칸 = 골
+        // 두 경우 모두 '길이 열려 있는 쪽'을 기준으로 각을 잡는다 (의미를 통일해야 보정값이 헷갈리지 않는다).
+        if (!hasPrev)
+        {
+            prefab = (pathStartPrefab != null) ? pathStartPrefab : pathStraightPrefab;
+            yaw = Yaw(dirOut) + startYawOffset;          // 나가는 쪽으로 열림
+            return;
+        }
+        if (!hasNext)
+        {
+            prefab = (pathEndPrefab != null) ? pathEndPrefab : pathStraightPrefab;
+            yaw = Yaw(-dirIn) + endYawOffset;            // 들어온 쪽으로 열림 (진행 방향의 반대)
+            return;
+        }
+
+        if (dirIn == dirOut)   // 들어온 방향과 나가는 방향이 같다 = 직선
+        {
+            prefab = pathStraightPrefab;
+            yaw = Yaw(dirOut) + straightYawOffset;
+            return;
+        }
+
+        // 코너. 열린 두 변은 '들어온 쪽'(-dirIn)과 '나가는 쪽'(dirOut)이다.
+        // 두 방향을 더하면 대각선이 나오고, 그 각도가 45/135/225/315로 네 방향에 딱 갈린다.
+        // 경로를 거꾸로 지나가도 같은 값이 나오므로 진행 방향과 무관하게 일관된다.
+        if (pathCornerPrefab != null)
+        {
+            prefab = pathCornerPrefab;
+            yaw = Yaw((-dirIn) + dirOut) + cornerYawOffset;
+        }
+        else
+        {
+            // 코너 모델이 없으면 직선으로 때운다 (대각선 각을 쓰면 어색해지므로 진행 방향 기준)
+            prefab = pathStraightPrefab;
+            yaw = Yaw(dirOut) + straightYawOffset;
+        }
+    }
+
+    // 그리드 방향(x, y) → Y축 회전각. (0,1)=+Z=0° · (1,0)=+X=90° · (0,-1)=180° · (-1,0)=270°
+    static float Yaw(Vector2Int d)
+    {
+        if (d == Vector2Int.zero) return 0f;
+        return Mathf.Atan2(d.x, d.y) * Mathf.Rad2Deg;
     }
 
     // 사행(뱀형) 경로: 오른쪽↔왼쪽으로 왕복하며 세로로 훑다가, 마지막에 오른쪽 끝으로 빠져나간다.

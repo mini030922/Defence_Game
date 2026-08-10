@@ -55,8 +55,25 @@ public class RoundManager : MonoBehaviour
     [Header("설정")]
     public int roundsPerStage = 10;
     public float prepTime = 5f;
-    public float enemyHeight = 0.6f;
+    public float enemyHeight = 0.6f;   // 캡슐 프리미티브용: 피벗이 몸통 중앙이라 반높이만큼 띄운다
     public bool randomizePathEachEpisode = true; // 에피소드마다 경로를 무작위로 (학습 일반화)
+
+    [Header("적 모델 프리팹 (2026-08-08 신설)")]
+    // EnemyType.prefab을 채우면 그 종류가 캡슐 대신 그 모델로 스폰된다.
+    //
+    // 타일 지오메트리: Cube(1×1×1) × scale(0.95, 0.2, 0.95), 중심 y=0 → **윗면이 y=0.10**.
+    // 캐릭터 모델은 보통 발바닥이 피벗이므로 여기에 딱 올려놓으면 된다.
+    // (SplashEffect.groundY 0.16과 같은 계산이다 — 그쪽은 원판이 파묻히지 않게 조금 더 띄운 값)
+    public float enemyGroundY = 0.1f;
+
+    // 학습에서도 모델을 쓸지. **기본 false**.
+    //  · SkinnedMeshRenderer + Animator는 캡슐 프리미티브보다 훨씬 무겁다.
+    //    --num-envs=6 × --time-scale=20 × 라운드당 60마리면 그대로 학습 속도에 반영된다.
+    //  · 더 중요한 이유: 학습 환경이 바뀌면 plc/dda가 배운 환경과 달라진다.
+    //    적의 겉모습은 관측에 들어가지 않지만, 프레임 시간이 바뀌면 Update 기반의
+    //    이동·공격 타이밍이 미세하게 달라져 재현성이 깨진다.
+    //  · 체력바(showEnemyHealthBars)·광역 표시(showSplashEffects)와 같은 원칙이다.
+    public bool useModelsInTraining = false;
 
     [Header("스테이지별 기본 스케일 (DDA가 아무것도 안 했을 때의 난이도)")]
     // 0.2 / 0.3 → 0.12 / 0.12 (2026-07-28).
@@ -238,6 +255,26 @@ public class RoundManager : MonoBehaviour
     // 배치 에이전트 관찰용 접근자
     public int CurrentRound => currentRound;
     public int RoundsPerStage => roundsPerStage;
+
+    // ── GameUI 연동용 접근자 (2026-08-09) ────────────────────────────────
+    // 내부 상태는 private으로 두되, UI가 읽어야 하는 것만 읽기 전용으로 연다.
+    // (UI가 상태를 직접 바꾸지 못하게 해서 라운드 진행 로직의 주인을 여기로 유지한다)
+    public enum UiPhase { Prep, Preview, Spawning, Fighting, StageClear, StageFail }
+    public UiPhase Phase => (UiPhase)(int)state;
+    public float PrepRemaining => prepRemaining;
+    public float PreviewRemaining => previewRemaining;
+    public string WavePreviewText => pendingWaveText;
+    public int AliveEnemies => aliveEnemies;
+    public bool HumanUxEnabled => HumanUx;
+    public int SpeedIndex => speedIndex;
+    public float[] SpeedOptions => speedOptions;
+    public bool SpeedControlAllowed => allowSpeedControl;
+
+    public void UiSetSpeed(int i) => SetSpeed(i);
+    public void UiSkip()
+    {
+        if (state == State.Prep || state == State.Preview) skipRequested = true;
+    }
     private int aliveEnemies = 0;
     private float prepRemaining = 0f;
     private int healthAtRoundStart = 0;
@@ -771,21 +808,18 @@ public class RoundManager : MonoBehaviour
         float stageFactor = 1f + killRewardStageGrowth * Mathf.Max(0, stg - 1);
         int reward = Mathf.Max(1, Mathf.RoundToInt(killRewardBase * ThreatCost(type, currentRound) * stageFactor));
 
-        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        go.name = $"Enemy_{type.typeName}";
-        go.transform.localScale = Vector3.one * type.scale;
+        bool useModel = UseModelFor(type);
+        GameObject go = CreateEnemyObject(type, useModel);
 
         Vector3 start = path[0];
-        go.transform.position = new Vector3(start.x, enemyHeight, start.z);
+        // 캡슐은 피벗이 몸통 중앙이라 반높이만큼 띄워야 하고(enemyHeight),
+        // 모델은 피벗이 발바닥이라 타일 윗면에 그대로 올린다(enemyGroundY).
+        float y = useModel ? (enemyGroundY + type.modelYOffset) : enemyHeight;
+        go.transform.position = new Vector3(start.x, y, start.z);
 
-        Renderer rend = go.GetComponent<Renderer>();
-        MaterialPropertyBlock mpb = new MaterialPropertyBlock();
-        rend.GetPropertyBlock(mpb);
-        mpb.SetColor("_BaseColor", type.color);
-        mpb.SetColor("_Color", type.color);
-        rend.SetPropertyBlock(mpb);
-
-        Enemy enemy = go.AddComponent<Enemy>();
+        // 프리팹에 이미 Enemy가 붙어 있을 수도 있으니 있으면 재사용한다 (중복 부착 방지)
+        Enemy enemy = go.GetComponent<Enemy>();
+        if (enemy == null) enemy = go.AddComponent<Enemy>();
         enemy.Init(path, health, speed);
         enemy.reward = reward;
         // 골 도달 데미지 = 플레이어 최대체력 × 종류별 비율 (탱커가 더 아픔)
@@ -797,6 +831,63 @@ public class RoundManager : MonoBehaviour
         if (aliveEnemies > maxAliveThisRound) maxAliveThisRound = aliveEnemies;
         enemy.onDied = OnEnemyDied;
         enemy.onReachedEnd = OnEnemyLeaked;
+    }
+
+    // ── 적 겉모습 만들기 (2026-08-08) ────────────────────────────────────
+    // 프리팹이 지정돼 있고 학습 중이 아니면 모델을, 아니면 기존 캡슐 프리미티브를 쓴다.
+    bool UseModelFor(EnemyType type)
+    {
+        if (type == null || type.prefab == null) return false;
+        return !Application.isBatchMode || useModelsInTraining;
+    }
+
+    GameObject CreateEnemyObject(EnemyType type, bool useModel)
+    {
+        GameObject go;
+
+        if (useModel)
+        {
+            go = Instantiate(type.prefab);
+
+            // 프리팹 원본 배율을 '곱한다'. 덮어쓰지 않는 이유: FBX가 cm 단위로 들어와
+            // 루트에 0.01 같은 단위 변환 배율이 박혀 있는 경우가 있는데, 덮어쓰면 100배가 된다.
+            // 최종 크기 = 원본 배율 × (종류별 상대 크기 × 모델 보정)
+            Vector3 baseScale = go.transform.localScale;
+            go.transform.localScale = baseScale * Mathf.Max(0.01f, type.scale * type.modelScale);
+
+            // 콜라이더는 전부 끈다. 적이 경로 위를 지나가는데 콜라이더가 살아 있으면
+            // BuildManager의 타일 레이캐스트가 적을 먼저 맞아서 그 칸을 영영 못 고르게 된다.
+            // (타워 이동 모드에서 콜라이더를 끄는 것과 같은 이유)
+            foreach (Collider c in go.GetComponentsInChildren<Collider>(true))
+                if (c != null) c.enabled = false;
+        }
+        else
+        {
+            go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            go.transform.localScale = Vector3.one * type.scale;
+        }
+
+        go.name = $"Enemy_{type.typeName}";
+
+        // 캡슐은 항상 종류 색으로 칠한다(그것 말고 구분할 방법이 없다).
+        // 모델은 tintWithColor를 켠 종류만 — 끄면 프리팹의 얼굴·텍스처가 그대로 살아난다.
+        if (!useModel || type.tintWithColor) Tint(go, type.color);
+
+        return go;
+    }
+
+    // MaterialPropertyBlock으로 색만 바꾼다 (머티리얼을 복제하지 않아 드로우콜·GC가 늘지 않는다)
+    static void Tint(GameObject go, Color color)
+    {
+        MaterialPropertyBlock mpb = new MaterialPropertyBlock();
+        foreach (Renderer rend in go.GetComponentsInChildren<Renderer>(true))
+        {
+            if (rend == null) continue;
+            rend.GetPropertyBlock(mpb);
+            mpb.SetColor("_BaseColor", color);
+            mpb.SetColor("_Color", color);
+            rend.SetPropertyBlock(mpb);
+        }
     }
 
     void OnEnemyDied(Enemy e)
@@ -855,6 +946,9 @@ public class RoundManager : MonoBehaviour
 
     void OnGUI()
     {
+        // GameUI(Canvas)가 살아 있으면 옛 OnGUI HUD는 그리지 않는다.
+        // 씬에서 GameUI 오브젝트를 지우면 자동으로 이 HUD가 다시 나온다 — 되돌리기가 쉽다.
+        if (!GameUI.LegacyHudEnabled) return;
         HudScaler.Begin();
         GUIStyle style = new GUIStyle { fontSize = 20 };
         style.normal.textColor = Color.white;
